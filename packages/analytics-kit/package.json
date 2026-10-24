@@ -1,6 +1,6 @@
 {
 	"name": "@numoteq/analytics-kit",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"description": "First-party analytics for Cloudflare Workers and Astro: a proxy to self-hosted server-side Google Tag Manager, server events through the Measurement Protocol, and a c15t preset",
 	"keywords": [
 		"analytics",
