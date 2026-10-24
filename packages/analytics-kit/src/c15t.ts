@@ -26,7 +26,11 @@ export function c15tPreset(overrides: C15tAstroOptions = {}): C15tPreset {
 	};
 }
 
-export interface GtmScriptOptions extends Omit<GoogleTagManagerOptions, "id"> {
+/**
+ * No `dataLayer`: c15t would queue consent into the renamed layer, while our loader serves gtm.js
+ * without `l=` and the container keeps listening to `dataLayer`.
+ */
+export interface GtmScriptOptions extends Omit<GoogleTagManagerOptions, "id" | "dataLayer"> {
 	/** Only fills the Google URL we replace; the Worker reads the real id from `GTM_ID`. */
 	readonly id?: string;
 	/** Host the loader path derives from. Defaults to `location.host`; pass it on the server. */

@@ -88,12 +88,10 @@ describe("@numoteq/analytics-kit/astro", () => {
 	it("passes server event options through", () => {
 		const { source } = setup({
 			serverEvents: {
-				measurementIdVar: "GA4_ID",
 				apiSecretVar: "MP_SECRET",
 				path: "/mp/collect",
 			},
 		});
-		expect(source).toContain('env["GA4_ID"]');
 		expect(source).toContain('env["MP_SECRET"]');
 		expect(source).toContain('"/mp/collect"');
 	});

@@ -32,7 +32,10 @@ export class ProxyConfig extends Context.Service<ProxyConfig, ResolvedOptions>()
 	}
 }
 
-/** Validates the proxy and the loader independently; a broken one does not take down the other. */
+/**
+ * Validates each part on its own: a missing or invalid `gtmId` empties the loader alone, while
+ * without `sgtm` both the loader and the prefix are off.
+ */
 export function resolveOptions(options: AnalyticsOptions): ResolvedOptions {
 	const gtmId = decodePart(GtmId, options.gtmId, "gtmId", "the loader serves an empty script");
 	const sgtm = decodePart(

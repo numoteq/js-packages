@@ -81,6 +81,23 @@ export function filterCookies(header: string | null): string {
 		.join("; ");
 }
 
+/** Analytics storage among the allowed cookies; the rest of them are ad storage. */
+const ANALYTICS_COOKIE = /^(_ga$|_ga_|_gid$|FPID$|FPLC$|FPGSID$)/;
+
+/** The allowed cookies of the storage the visitor consented to, as a `cookie` header. */
+export function consentedCookies(
+	header: string | undefined,
+	consent: { readonly analytics: boolean; readonly ads: boolean },
+): string {
+	return filterCookies(header ?? null)
+		.split("; ")
+		.filter((pair) => {
+			if (pair === "") return false;
+			return ANALYTICS_COOKIE.test(pair.split("=", 1)[0]!) ? consent.analytics : consent.ads;
+		})
+		.join("; ");
+}
+
 /**
  * Headers of a forwarded request. Everything the browser sent is kept, Cloudflare headers
  * included, so sGTM tags can read `cf-*`; only credentials, `cookie` and `x-forwarded-for` are

@@ -86,4 +86,10 @@ describe("gtmScript", () => {
 		expect(withRealId).not.toContain("GTM-NTQ37T97");
 		expect(serialized).toContain(loaderPath(host));
 	});
+
+	it("offers no dataLayer rename, which the loader would not follow", () => {
+		// @ts-expect-error the loader serves gtm.js without `l=`
+		const options: GtmScriptOptions = { host, dataLayer: "otherLayer" };
+		expect(options.host).toBe(host);
+	});
 });

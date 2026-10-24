@@ -269,6 +269,14 @@ describe("handle", () => {
 			}),
 		);
 
+		it.effect("answers 404 to a plain request under the prefix, without calling sGTM", () =>
+			Effect.gen(function* () {
+				const fake = upstream(() => new Response(null, { status: 204 }));
+				expect(status(yield* run(new Request(`${origin}/_sgtm/g/collect?v=2`), fake))).toBe(404);
+				expect(fake.calls).toHaveLength(0);
+			}),
+		);
+
 		it.effect("refuses a token whose path would leave the upstream", () =>
 			Effect.gen(function* () {
 				const fake = upstream(() => script());

@@ -3,8 +3,6 @@ import type { AstroIntegration } from "astro";
 export interface ServerEventsAstroOptions {
 	/** Path of the Measurement Protocol client. Default `/mp/collect`. */
 	readonly path?: string;
-	/** Worker var with the GA4 measurement id (`G-…`). Unset, the event carries no `session_id`. */
-	readonly measurementIdVar?: string;
 	/** Worker var with the API secret for the GA4 forward. */
 	readonly apiSecretVar?: string;
 }
@@ -65,9 +63,6 @@ function middlewareSource(
 ): string {
 	const settings = [
 		`path: ${JSON.stringify(serverEvents.path ?? "/mp/collect")},`,
-		serverEvents.measurementIdVar === undefined
-			? undefined
-			: `measurementId: env[${JSON.stringify(serverEvents.measurementIdVar)}],`,
 		serverEvents.apiSecretVar === undefined
 			? undefined
 			: `apiSecret: env[${JSON.stringify(serverEvents.apiSecretVar)}],`,

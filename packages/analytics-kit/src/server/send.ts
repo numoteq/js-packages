@@ -11,6 +11,7 @@ import {
 	Schema,
 } from "effect";
 
+import { consentedCookies } from "../rewrite.js";
 import { decodePart, optionalPart, Upstream } from "../schema.js";
 import { callUpstream, toTarget, type UpstreamInput, type UpstreamTarget } from "../upstream.js";
 import { RequestContext, type Consent } from "./context.js";
@@ -18,10 +19,6 @@ import { RequestContext, type Consent } from "./context.js";
 /** The path of the Measurement Protocol client in the server container. */
 const DEFAULT_PATH = "/mp/collect";
 const DEFAULT_TIMEOUT = Duration.seconds(5);
-
-const MeasurementId = Schema.String.check(
-	Schema.isPattern(/^G-[A-Z0-9]+$/, { expected: "a GA4 measurement id (G-…)" }),
-);
 
 const ClientPath = Schema.String.check(
 	Schema.makeFilter((value) => value.startsWith("/") && !value.startsWith("//"), {
@@ -48,12 +45,7 @@ export interface ServerEventsOptions {
 	readonly upstream?: UpstreamInput | undefined;
 	/** Path of the Measurement Protocol client. Default `/mp/collect`. */
 	readonly path?: string | undefined;
-	/**
-	 * GA4 measurement id (`G-…`). Selects the `_ga_<id>` session cookie and is passed on to Google
-	 * when a GA4 tag forwards the hit. Without it the event carries no `session_id`.
-	 */
-	readonly measurementId?: string | undefined;
-	/** API secret for that forward. The self-hosted container accepts any value itself. */
+	/** Passed through as `api_secret`. The self-hosted container accepts any value itself. */
 	readonly apiSecret?: string | undefined;
 	readonly timeout?: Duration.Duration | undefined;
 }
@@ -62,7 +54,6 @@ export interface ServerEventsOptions {
 export interface ServerEventsSettings {
 	readonly target: UpstreamTarget;
 	readonly path: string;
-	readonly measurementId?: string | undefined;
 	readonly apiSecret?: string | undefined;
 	readonly timeout: Duration.Duration;
 }
@@ -114,10 +105,10 @@ const hashUser = (user: ServerEvent["user"]) =>
 			});
 
 /**
- * The Measurement Protocol body. `page_location` describes the visit; `client_id`, `session_id`,
- * `_fbp`/`_fbc` and `user_data` are the visitor's identifiers. They travel only with the consent
- * they belong to: analytics storage for the GA cookies, marketing for the Meta ones and for the
- * hashes, because a hashed e-mail is still personal data.
+ * The Measurement Protocol body. `page_location` describes the visit; `client_id`, `_fbp`/`_fbc`
+ * and `user_data` are the visitor's identifiers. They travel only with the consent they belong
+ * to: analytics storage for the GA cookies, marketing for the Meta ones and for the hashes,
+ * because a hashed e-mail is still personal data.
  */
 const payloadOf = (context: RequestContext, event: ServerEvent) =>
 	Effect.gen(function* () {
@@ -133,7 +124,6 @@ const payloadOf = (context: RequestContext, event: ServerEvent) =>
 
 		const pageLocation = event.pageLocation ?? context.pageLocation;
 		if (pageLocation !== undefined) params["page_location"] = pageLocation;
-		if (measurement && context.sessionId !== undefined) params["session_id"] = context.sessionId;
 		if (marketing) {
 			if (context.fbp !== undefined) params["_fbp"] = context.fbp;
 			if (context.fbc !== undefined) params["_fbc"] = context.fbc;
@@ -158,10 +148,25 @@ const payloadOf = (context: RequestContext, event: ServerEvent) =>
 
 function queryOf(settings: ServerEventsSettings, context: RequestContext): string {
 	const query = new URLSearchParams();
-	if (settings.measurementId) query.set("measurement_id", settings.measurementId);
 	if (settings.apiSecret) query.set("api_secret", settings.apiSecret);
 	query.set("gcs", gcsOf(context.consent));
 	return query.toString();
+}
+
+/**
+ * The visitor's address, browser and consented cookies as headers too, the way the proxy forwards
+ * a browser hit, so sGTM tags read them alike whatever the Measurement Protocol client maps.
+ */
+function headersOf(context: RequestContext): Record<string, string> {
+	const headers: Record<string, string> = { "content-type": "application/json" };
+	if (context.ip !== undefined) headers["x-forwarded-for"] = context.ip;
+	if (context.userAgent !== undefined) headers["user-agent"] = context.userAgent;
+	const cookie = consentedCookies(context.cookie, {
+		analytics: context.consent.measurement === true,
+		ads: context.consent.marketing === true,
+	});
+	if (cookie !== "") headers["cookie"] = cookie;
+	return headers;
 }
 
 const timeout = (duration: Duration.Duration) =>
@@ -178,20 +183,26 @@ const requestOf = Effect.fn("analytics.serverEvent")(function* (
 ) {
 	const body = yield* payloadOf(context, event);
 	const path = `${settings.path}?${queryOf(settings, context)}`;
-	const response = yield* Effect.tryPromise({
-		try: (signal) =>
-			callUpstream(settings.target, path, {
+	// The timeout covers reading a refusal's body too, not just the response headers.
+	const refusal = yield* Effect.tryPromise({
+		try: async (signal) => {
+			const response = await callUpstream(settings.target, path, {
 				method: "POST",
-				headers: { "content-type": "application/json" },
+				headers: headersOf(context),
 				body: JSON.stringify(body),
 				signal,
-			}),
+			});
+			if (response.ok) return undefined;
+			return { status: response.status, detail: await response.text().catch(() => "") };
+		},
 		catch: (cause) => new ServerEventUnavailable({ reason: "sgtm fetch failed", cause }),
 	}).pipe(timeout(settings.timeout));
 
-	if (response.ok) return;
-	const detail = yield* Effect.promise(() => response.text().catch(() => ""));
-	return yield* new ServerEventRejected({ status: response.status, detail: detail.slice(0, 200) });
+	if (refusal === undefined) return;
+	return yield* new ServerEventRejected({
+		status: refusal.status,
+		detail: refusal.detail.slice(0, 200),
+	});
 });
 
 /** Sends server-originated events to the Measurement Protocol client of our sGTM. */
@@ -220,21 +231,13 @@ export function resolveServerEventsOptions(
 	label = "upstream",
 ): Result.Result<ServerEventsSettings, string> {
 	const upstream = decodePart(Upstream, options.upstream, label, "no event is sent");
-	const measurementId = optionalPart(
-		MeasurementId,
-		options.measurementId,
-		"measurementId",
-		"no session_id is read and Google receives no measurement id",
-	);
 	const path = optionalPart(ClientPath, options.path, "path", "no event is sent");
 
 	if (Result.isFailure(upstream)) return Result.fail(upstream.failure);
-	if (Result.isFailure(measurementId)) return Result.fail(measurementId.failure);
 	if (Result.isFailure(path)) return Result.fail(path.failure);
 	return Result.succeed({
 		target: toTarget(upstream.success),
 		path: path.success ?? DEFAULT_PATH,
-		measurementId: measurementId.success,
 		apiSecret: options.apiSecret,
 		timeout: options.timeout ?? DEFAULT_TIMEOUT,
 	});
@@ -250,14 +253,11 @@ export interface ServerEventsClient {
  * resolves. Shared by `createServerEvents` and the combined client.
  */
 export const promiseSender =
-	(
-		runtime: ManagedRuntime.ManagedRuntime<ServerEvents, never>,
-		measurementId: string | undefined,
-	): ServerEventsClient["send"] =>
+	(runtime: ManagedRuntime.ManagedRuntime<ServerEvents, never>): ServerEventsClient["send"] =>
 	(request, event, consent) =>
 		runtime.runPromise(
 			ServerEvents.use((events) =>
-				events.send(RequestContext.fromRequest(request, consent, measurementId), event),
+				events.send(RequestContext.fromRequest(request, consent), event),
 			).pipe(
 				Effect.catchCause((cause) =>
 					Effect.logWarning(`analytics server event dropped: ${Cause.pretty(cause)}`),
@@ -285,5 +285,5 @@ export function createServerEvents(options: ServerEventsOptions = {}): ServerEve
 
 	const settings = resolved.success;
 	const runtime = ManagedRuntime.make(Layer.mergeAll(ServerEvents.layer(settings), logger));
-	return { send: promiseSender(runtime, settings.measurementId) };
+	return { send: promiseSender(runtime) };
 }

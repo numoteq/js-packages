@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import fixture from "./fixtures/gtm-excerpt.js.txt?raw";
 
 import {
+	consentedCookies,
 	filterCookies,
 	rebuildResponse,
 	rewriteGtmHosts,
@@ -45,6 +46,21 @@ describe("filterCookies", () => {
 			filterCookies("_ga=GA1.1.1; session=secret; _ga_ABC=GS1; FPID=x; _fbp=fb; cf_clearance=y"),
 		).toBe("_ga=GA1.1.1; _ga_ABC=GS1; FPID=x; _fbp=fb");
 		expect(filterCookies(null)).toBe("");
+	});
+});
+
+describe("consentedCookies", () => {
+	const header = "_ga=GA1.1.1; _ga_ABC=GS1; FPID=x; _gcl_au=1; _gac_X=2; _fbp=fb; session=secret";
+
+	it("splits the allowed cookies into analytics and ad storage", () => {
+		expect(consentedCookies(header, { analytics: true, ads: false })).toBe(
+			"_ga=GA1.1.1; _ga_ABC=GS1; FPID=x",
+		);
+		expect(consentedCookies(header, { analytics: false, ads: true })).toBe(
+			"_gcl_au=1; _gac_X=2; _fbp=fb",
+		);
+		expect(consentedCookies(header, { analytics: false, ads: false })).toBe("");
+		expect(consentedCookies(undefined, { analytics: true, ads: true })).toBe("");
 	});
 });
 

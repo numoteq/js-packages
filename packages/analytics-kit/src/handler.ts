@@ -26,7 +26,7 @@ const LOADER_TIMEOUT = Duration.seconds(10);
 const REQUEST_TIMEOUT = Duration.seconds(5);
 const CACHE_TTL_SECONDS = 300;
 
-/** The sGTM or an upstream of one prefix did not answer in time or could not be reached. */
+/** sGTM did not answer in time or could not be reached. */
 export class UpstreamUnavailable extends Schema.TaggedError<UpstreamUnavailable>()(
 	"UpstreamUnavailable",
 	{ reason: Schema.String, cause: Schema.optional(Schema.Defect()) },
@@ -40,7 +40,7 @@ export interface UpstreamClient {
 	readonly fetch: (path: string, init: RequestInit) => Effect.Effect<Response, UpstreamUnavailable>;
 }
 
-/** The configured upstreams. A prefix without one answers 404 and the other prefixes keep working. */
+/** The configured upstreams. A prefix without one answers 404. */
 export class Upstreams extends Context.Service<
 	Upstreams,
 	{ readonly get: (name: UpstreamName) => Option.Option<UpstreamClient> }
@@ -233,7 +233,7 @@ const forwardEncoded = Effect.fn("analytics.forward")(function* (
 			...(hasBody ? { duplex: "half" } : {}),
 		});
 		// Scripts the container loads itself, such as gtag.js, need their hosts rewritten too.
-		if (matched.name === "sgtm" && answer.ok && isJavaScript(answer)) {
+		if (answer.ok && isJavaScript(answer)) {
 			return yield* rewriteScript(request, answer);
 		}
 		return answer;

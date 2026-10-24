@@ -4,13 +4,7 @@ import { describe, expect, it, vi } from "@effect/vitest";
 import { Duration, Effect, Fiber, Result } from "effect";
 import { TestClock } from "effect/testing";
 
-import {
-	clientIdOf,
-	fromRequest,
-	RequestContext,
-	sessionCookieName,
-	sessionIdOf,
-} from "../src/server/context.js";
+import { clientIdOf, fromRequest, RequestContext } from "../src/server/context.js";
 import type { Consent } from "../src/server/context.js";
 import {
 	createServerEvents,
@@ -36,22 +30,6 @@ describe("clientIdOf", () => {
 	});
 });
 
-describe("sessionIdOf", () => {
-	it("reads the session start from GS1", () => {
-		expect(sessionIdOf("GS1.1.1730000000.3.1.1730000300.0.0.0")).toBe("1730000000");
-	});
-
-	it("reads the session start from GS2", () => {
-		expect(sessionIdOf("GS2.1.s1730000000$o3$g1$t1730000300$j10$l0$h12345678")).toBe("1730000000");
-		expect(sessionIdOf("GS2.1.s1730000000%24o3%24g1%24t1730000300")).toBe("1730000000");
-	});
-
-	it("gives up on anything else", () => {
-		expect(sessionIdOf(undefined)).toBeUndefined();
-		expect(sessionIdOf("garbage")).toBeUndefined();
-	});
-});
-
 const apiRequest = (headers: Record<string, string>) =>
 	new Request("https://site.example/api/contact", { method: "POST", headers });
 
@@ -61,18 +39,19 @@ describe("fromRequest", () => {
 			apiRequest({
 				cookie:
 					"_ga=GA1.1.123.456; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0; " +
-					"_fbp=fb.1.1730000000.1; _fbc=fb.1.1730000000.xyz",
+					"_fbp=fb.1.1730000000.1; _fbc=fb.1.1730000000.xyz; session=secret",
 				"cf-connecting-ip": "203.0.113.9",
 				"user-agent": "Mozilla/5.0",
 				referer: "https://site.example/sluzby?utm_source=x",
 			}),
 			{ measurement: true },
-			"G-WSNXXNBYV7",
 		);
 
 		expect(context).toEqual({
 			clientId: "123.456",
-			sessionId: "1730000000",
+			cookie:
+				"_ga=GA1.1.123.456; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0; " +
+				"_fbp=fb.1.1730000000.1; _fbc=fb.1.1730000000.xyz",
 			ip: "203.0.113.9",
 			userAgent: "Mozilla/5.0",
 			pageLocation: "https://site.example/sluzby?utm_source=x",
@@ -102,38 +81,6 @@ describe("fromRequest", () => {
 	});
 });
 
-describe("sessionCookieName", () => {
-	it("names the cookie after the GA4 id without its prefix", () => {
-		expect(sessionCookieName("G-WSNXXNBYV7")).toBe("_ga_WSNXXNBYV7");
-	});
-
-	it("leaves an id it does not understand unmatched", () => {
-		expect(sessionCookieName("S-ABC")).toBe("_ga_S-ABC");
-		expect(sessionCookieName("AW-123")).toBe("_ga_AW-123");
-	});
-});
-
-const sessionContext = (cookie: string, measurementId?: string) =>
-	fromRequest(new Request("https://site.example/api", { headers: { cookie } }), {}, measurementId);
-
-describe("fromRequest session cookie", () => {
-	it("takes the cookie of the configured stream, not the first one", () => {
-		const value = sessionContext(
-			"_ga_OTHER=GS1.1.111.1.0.111.0.0.0; _ga_WSNXXNBYV7=GS1.1.222.1.0.222.0.0.0",
-			"G-WSNXXNBYV7",
-		);
-
-		expect(value.sessionId).toBe("222");
-	});
-
-	it("sends no session id rather than another property's", () => {
-		expect(
-			sessionContext("_ga_OTHER=GS1.1.111.1.0.111.0.0.0", "G-WSNXXNBYV7").sessionId,
-		).toBeUndefined();
-		expect(sessionContext("_ga_WSNXXNBYV7=GS1.1.222.1.0.222.0.0.0").sessionId).toBeUndefined();
-	});
-});
-
 describe("gcsOf", () => {
 	it("maps marketing to ad storage and measurement to analytics storage", () => {
 		expect(gcsOf({})).toBe("G100");
@@ -145,7 +92,8 @@ describe("gcsOf", () => {
 
 interface Call {
 	readonly path: string;
-	readonly body: string;
+	readonly headers: Headers;
+	body: string;
 }
 
 /** A fake sGTM: records every call and answers with `respond`, or hangs when it returns "hang". */
@@ -154,7 +102,7 @@ function upstream(respond: (call: Call) => Response | "hang") {
 	const binding = {
 		fetch: (request: Request): Promise<Response> => {
 			const url = new URL(request.url);
-			const call = { path: `${url.pathname}${url.search}`, body: "" };
+			const call = { path: `${url.pathname}${url.search}`, headers: request.headers, body: "" };
 			calls.push(call);
 			return new Promise<Response>((resolve) => {
 				void request.text().then((body) => {
@@ -174,26 +122,25 @@ const settings = (
 ): ServerEventsSettings => ({
 	target: fake.binding,
 	path: "/mp/collect",
-	measurementId: "G-WSNXXNBYV7",
 	apiSecret: "secret",
 	timeout: Duration.seconds(5),
 	...overrides,
 });
 
-const MEASUREMENT_ID = "G-WSNXXNBYV7";
+const COOKIES =
+	"_ga=GA1.1.123.456; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0; _fbp=fb.1.1.1";
 
 const CONTEXT = RequestContext.fromRequest(
 	new Request("https://site.example/api/contact", {
 		method: "POST",
 		headers: {
-			cookie: `_ga=GA1.1.123.456; ${sessionCookieName(MEASUREMENT_ID)}=GS1.1.1730000000.3.1.1730000300.0.0.0; _fbp=fb.1.1.1`,
+			cookie: `${COOKIES}; session=secret`,
 			"cf-connecting-ip": "203.0.113.9",
 			"user-agent": "Mozilla/5.0",
 			referer: "https://site.example/sluzby",
 		},
 	}),
 	{ measurement: true, marketing: true },
-	MEASUREMENT_ID,
 );
 
 const LEAD: ServerEvent = {
@@ -222,7 +169,10 @@ describe("send", () => {
 
 			expect(fake.calls).toHaveLength(1);
 			const [call] = fake.calls;
-			expect(call!.path).toBe("/mp/collect?measurement_id=G-WSNXXNBYV7&api_secret=secret&gcs=G111");
+			expect(call!.path).toBe("/mp/collect?api_secret=secret&gcs=G111");
+			expect(call!.headers.get("x-forwarded-for")).toBe("203.0.113.9");
+			expect(call!.headers.get("user-agent")).toBe("Mozilla/5.0");
+			expect(call!.headers.get("cookie")).toBe(COOKIES);
 
 			const body = JSON.parse(call!.body);
 			expect(body.client_id).toBe("123.456");
@@ -237,7 +187,6 @@ describe("send", () => {
 						value: 1000,
 						currency: "CZK",
 						page_location: "https://site.example/sluzby",
-						session_id: "1730000000",
 						_fbp: "fb.1.1.1",
 					},
 				},
@@ -311,11 +260,10 @@ describe("send", () => {
 			const context = RequestContext.fromRequest(
 				new Request("https://site.example/api/contact", {
 					headers: {
-						cookie: `_ga=GA1.1.123.456; ${sessionCookieName(MEASUREMENT_ID)}=GS1.1.1730000000.3.1.1730000300.0.0.0; _fbp=fb.1.1.1`,
+						cookie: COOKIES,
 					},
 				}),
 				{},
-				MEASUREMENT_ID,
 			);
 
 			yield* run(fake, LEAD, context);
@@ -323,9 +271,9 @@ describe("send", () => {
 			const body = JSON.parse(fake.calls[0]!.body);
 			expect(body.user_data).toBeUndefined();
 			expect(body.client_id).toMatch(/^[0-9a-f-]{36}$/);
-			expect(body.events[0].params["session_id"]).toBeUndefined();
 			expect(body.events[0].params["_fbp"]).toBeUndefined();
 			expect(body.events[0].params["_fbc"]).toBeUndefined();
+			expect(fake.calls[0]!.headers.has("cookie")).toBe(false);
 			expect(fake.calls[0]!.path).toContain("gcs=G100");
 		}),
 	);
@@ -336,18 +284,19 @@ describe("send", () => {
 			const context = RequestContext.fromRequest(
 				new Request("https://site.example/api/contact", {
 					headers: {
-						cookie: `_ga=GA1.1.123.456; ${sessionCookieName(MEASUREMENT_ID)}=GS1.1.1730000000.3.1.1730000300.0.0.0; _fbp=fb.1.1.1`,
+						cookie: COOKIES,
 					},
 				}),
 				{ measurement: true },
-				MEASUREMENT_ID,
 			);
 
 			yield* run(fake, LEAD, context);
 
 			const body = JSON.parse(fake.calls[0]!.body);
 			expect(body.client_id).toBe("123.456");
-			expect(body.events[0].params["session_id"]).toBe("1730000000");
+			expect(fake.calls[0]!.headers.get("cookie")).toBe(
+				"_ga=GA1.1.123.456; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0",
+			);
 			expect(body.events[0].params["_fbp"]).toBeUndefined();
 			expect(body.user_data).toBeUndefined();
 			expect(fake.calls[0]!.path).toContain("gcs=G101");
@@ -360,7 +309,6 @@ describe("send", () => {
 			const context = RequestContext.fromRequest(
 				new Request("https://site.example/api/contact"),
 				{},
-				MEASUREMENT_ID,
 			);
 
 			yield* run(
@@ -374,6 +322,20 @@ describe("send", () => {
 
 			const params = JSON.parse(fake.calls[0]!.body).events[0].params;
 			expect(params).toEqual({ form_id: "contact" });
+		}),
+	);
+
+	it.effect("times out while sGTM withholds the body of a refusal", () =>
+		Effect.gen(function* () {
+			const fake = upstream(
+				() => new Response(new ReadableStream({ start() {} }), { status: 500 }),
+			);
+			const fiber = yield* Effect.forkChild(Effect.flip(run(fake, { name: "generate_lead" })));
+			yield* TestClock.adjust("5 seconds");
+			const error = yield* Fiber.join(fiber);
+
+			expect(error).toBeInstanceOf(ServerEventUnavailable);
+			expect((error as ServerEventUnavailable).reason).toBe("timeout");
 		}),
 	);
 
@@ -395,11 +357,10 @@ describe("send", () => {
 });
 
 describe("resolveServerEventsOptions", () => {
-	it("rejects a measurement id that is not a GA4 one, and a path without /", () => {
+	it("rejects a path without a single leading /", () => {
 		const binding = { fetch: async () => new Response(null, { status: 204 }) };
 
 		for (const options of [
-			{ upstream: binding, measurementId: "GT-123" },
 			{ upstream: binding, path: "mp/collect" },
 			{ upstream: binding, path: "//evil.example/x" },
 		]) {
@@ -438,7 +399,6 @@ describe("createServerEvents", () => {
 			const fake = upstream(() => new Response(null, { status: 204 }));
 			const client = createServerEvents({
 				upstream: fake.binding,
-				measurementId: "G-WSNXXNBYV7",
 			});
 			const consent: Consent = { measurement: true };
 

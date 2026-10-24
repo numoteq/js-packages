@@ -79,7 +79,6 @@ describe("createAnalytics", () => {
 						: new Response(null, { status: 204 });
 				},
 			},
-			serverEvents: { measurementId: "G-WSNXXNBYV7" },
 		});
 
 		expect(await client.handle(new Request(`${origin}/blog`))).toBeNull();
@@ -92,18 +91,16 @@ describe("createAnalytics", () => {
 		expect(calls).toEqual(["/mp/collect"]);
 	});
 
-	it("reads the session id of its own measurement id", async () => {
-		let body = "";
+	it("passes the session cookies on to sGTM instead of reading them", async () => {
+		let sent: Request | undefined;
 		const client = createAnalytics({
 			gtmId: GTM_ID,
 			sgtm: {
 				fetch: async (request) => {
-					if (new URL(request.url).pathname === "/gtm.js") return script();
-					body = await request.text();
+					sent = request;
 					return new Response(null, { status: 204 });
 				},
 			},
-			serverEvents: { measurementId: "G-WSNXXNBYV7" },
 		});
 
 		await client.send(
@@ -118,7 +115,10 @@ describe("createAnalytics", () => {
 			{ measurement: true },
 		);
 
-		expect(JSON.parse(body).events[0].params.session_id).toBe("1730000000");
+		expect(sent?.headers.get("cookie")).toBe(
+			"_ga_OTHER=GS1.1.111.1.0.111.0.0.0; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0",
+		);
+		expect(JSON.parse(await sent!.text()).events[0].params.session_id).toBeUndefined();
 	});
 
 	it("turns a broken server events setting into a logged no-op", async () => {
@@ -132,13 +132,13 @@ describe("createAnalytics", () => {
 					return script();
 				},
 			},
-			serverEvents: { measurementId: "not-a-ga4-id" },
+			serverEvents: { path: "mp/collect" },
 		});
 
 		await client.send(new Request(`${origin}/api/lead`), { name: "generate_lead" });
 
 		expect(calls).toEqual([]);
-		expect(String(log.mock.calls[0]?.[0])).toContain("measurementId");
+		expect(String(log.mock.calls[0]?.[0])).toContain("path");
 		log.mockRestore();
 	});
 

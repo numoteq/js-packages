@@ -1,5 +1,7 @@
 /** What a server event needs to know about the request that caused it. */
 
+import { filterCookies } from "../rewrite.js";
+
 /** Consent categories, the same names the c15t preset offers. */
 export type ConsentCategory =
 	| "necessary"
@@ -17,8 +19,11 @@ export interface RequestContext {
 	 * without consent, because the cookie is not there; the sender then generates a fresh one.
 	 */
 	readonly clientId?: string;
-	/** `_ga_<id>` session start timestamp, GS1 and GS2 formats. */
-	readonly sessionId?: string;
+	/**
+	 * The analytics cookies the proxy forwards too, such as `_ga_<id>`: sGTM reads the session from
+	 * them, so the Worker needs no GA4 settings. The sender passes on only the consented ones.
+	 */
+	readonly cookie?: string;
 	readonly ip?: string;
 	readonly userAgent?: string;
 	/** The page the visitor was on, from `Referer`; `page_location` of the event. */
@@ -47,20 +52,6 @@ export function clientIdOf(value: string | undefined): string | undefined {
 	return parts.length < 3 ? undefined : parts.slice(-2).join(".");
 }
 
-/**
- * The session id from `_ga_<id>`: GS1 keeps it as the third dot-separated field, GS2 as the `s`
- * field of its `$`-separated tail. Both are the session start in seconds, which is what GA4 calls
- * `session_id`.
- */
-export function sessionIdOf(value: string | undefined): string | undefined {
-	if (!value) return undefined;
-	const decoded = value.includes("$") ? value : value.replaceAll("%24", "$");
-	const gs2 = /^GS2\.\d+\.s(\d+)\$/.exec(decoded);
-	if (gs2) return gs2[1];
-	const gs1 = /^GS1\.\d+\.(\d+)\./.exec(decoded);
-	return gs1?.[1];
-}
-
 /** The click id Meta reads from `_fbc`; without the cookie, rebuild it from `fbclid`. */
 function fbcOf(cookie: string | undefined, fbclid: string | undefined): string | undefined {
 	if (cookie) return cookie;
@@ -77,15 +68,6 @@ function fbclidOf(referer: string | undefined): string | undefined {
 	}
 }
 
-/**
- * The session cookie of a GA4 stream: `G-ABC123` names `_ga_ABC123`, the id without its prefix.
- * Other prefixes are left as they are, so an id we do not understand yields no match rather than
- * somebody else's cookie. A GA4 `cookie_prefix` renames all of these; such a site gets none.
- */
-export function sessionCookieName(measurementId: string): string {
-	return `_ga_${measurementId.replace(/^G-/, "")}`;
-}
-
 function ipOf(request: Request): string | undefined {
 	const forwarded = request.headers.get("cf-connecting-ip");
 	if (forwarded) return forwarded;
@@ -97,24 +79,14 @@ function ipOf(request: Request): string | undefined {
  * Reads the visitor's identifiers, address and consent off the request. Call this at the moment
  * the event happens, not when the handler is built: the consent middleware of c15t runs later and
  * the cookies are whatever the browser sent with this request.
- *
- * `measurementId` picks the session cookie; without it there is no `session_id`, because guessing
- * from the first `_ga_*` cookie of another property would attach the event to a stranger's session.
  */
-export function fromRequest(
-	request: Request,
-	consent: Consent = {},
-	measurementId?: string,
-): RequestContext {
-	const jar = cookies(request.headers.get("cookie"));
+export function fromRequest(request: Request, consent: Consent = {}): RequestContext {
+	const header = request.headers.get("cookie");
+	const jar = cookies(header);
 	const referer = request.headers.get("referer") ?? undefined;
-	const ga = jar.get("_ga");
 	return {
-		clientId: clientIdOf(ga),
-		sessionId:
-			measurementId === undefined
-				? undefined
-				: sessionIdOf(jar.get(sessionCookieName(measurementId))),
+		clientId: clientIdOf(jar.get("_ga")),
+		cookie: filterCookies(header) || undefined,
 		ip: ipOf(request),
 		userAgent: request.headers.get("user-agent") ?? undefined,
 		pageLocation: referer,

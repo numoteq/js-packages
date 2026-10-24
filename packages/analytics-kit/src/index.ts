@@ -114,7 +114,7 @@ export function createAnalytics(options: AnalyticsClientOptions): AnalyticsClien
 	logWarnings(runtime);
 	return {
 		handle: proxyHandler(runtime),
-		send: promiseSender(runtime, settings.measurementId),
+		send: promiseSender(runtime),
 	};
 }
 

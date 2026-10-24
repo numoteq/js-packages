@@ -58,7 +58,7 @@ Server events are on whenever `SGTM_UPSTREAM` is set; the middleware sets `local
 analytics({
 	gtmIdVar: "WEB_GTM",
 	sgtmBinding: "TAGGING",
-	serverEvents: { measurementIdVar: "GA4_ID", apiSecretVar: "MP_SECRET" },
+	serverEvents: { apiSecretVar: "MP_SECRET" },
 });
 ```
 
@@ -113,7 +113,7 @@ Web container:
 
 Conversions the backend confirms (a lead stored, an order paid) are sent from the Worker, not the browser: they survive ad blockers and closed tabs. The event originates on the server and goes through sGTM, which routes it to GA4, Meta CAPI, Umami and OpenPanel like any other hit.
 
-Server container: add a **Measurement Protocol** client and note its activation path. Give the sender that path (default `/mp/collect`). `measurement_id` and `api_secret` are optional pass-through fields; the container itself accepts any value, Google validates them only when a GA4 tag forwards the hit.
+Server container: add a **Measurement Protocol** client and note its activation path. Give the sender that path (default `/mp/collect`). The Worker knows nothing about the destinations: the GA4 measurement id, the Umami website, the Meta pixel and the rest are set in the server container's tags. `api_secret` is an optional pass-through field; the container itself accepts any value.
 
 ```ts
 // an Astro action or API route, after the lead is stored
@@ -138,13 +138,14 @@ The sender adds what the browser would have sent, read from the request:
 | Field | Source | Sent with |
 | --- | --- | --- |
 | `page_location` | the request's `Referer`, or a `pageLocation` you pass | always |
-| `ip_override`, `user_agent` | `cf-connecting-ip` (or `x-forwarded-for`), `user-agent` | always |
+| `ip_override`, `user_agent`, also as `x-forwarded-for` and `user-agent` headers | `cf-connecting-ip` (or `x-forwarded-for`), `user-agent` | always |
 | `client_id` | `_ga`; a random UUID when there is no cookie or analytics consent | `measurement` |
-| `session_id` | `_ga_<id>` of the configured GA4 `measurementId` (`G-…`), both `GS1` and `GS2` formats | `measurement` |
+| `cookie` header: `_ga`, `_ga_*`, `_gid`, `FPID`, `FPLC`, `FPGSID` | the request's cookies | `measurement` |
+| `cookie` header: the other forwarded cookies (`_gcl_*`, `_fbp`, `_fbc`, …) | the request's cookies | `marketing` |
 | `_fbp` / `_fbc` | the cookies; `_fbc` is rebuilt from `fbclid` when the cookie is not there yet | `marketing` |
 | `user_data.sha256_email_address`, `sha256_phone_number` | `user: { email, phone }`, normalized and SHA-256 hashed in the Worker | `marketing` |
 
-A cookie of another property is never mistaken for ours: `session_id` comes from `_ga_<id>` of the `measurementId` you configure, and without that option the event carries none. A GA4 `cookie_prefix` renames those cookies, so such a site gets no `session_id` either. A hashed e-mail is still personal data, so it travels only with marketing consent; the plain values never leave the Worker. The IP, the user agent and the page are the open part of the hit (Meta matches on them without cookies) and go out even when nothing is granted.
+The Worker sends no `session_id`: it would need to know the GA4 property to pick its `_ga_<id>` cookie. The consented cookies go along instead, the same allowlist the proxy forwards, and the server container reads the session from them (for example a Cookie Value variable for `_ga_<id>` and a transformation that sets `ga_session_id` on Measurement Protocol events). A hashed e-mail is still personal data, so it travels only with marketing consent; the plain values never leave the Worker. The IP, the user agent and the page are the open part of the hit (Meta matches on them without cookies) and go out even when nothing is granted.
 
 Consent goes both ways: the MP body's `consent` object for the record, and the `gcs` query parameter (`G1` + ad + analytics, the same signal gtag sends). Server tags read consent from `x-ga-gcs`, which the Measurement Protocol client builds from `gcs`; the claim comes from the container bytecode, so confirm one hit in the sGTM Preview after you change it.
 
