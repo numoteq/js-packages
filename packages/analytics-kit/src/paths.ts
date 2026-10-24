@@ -4,20 +4,11 @@
  */
 
 /**
- * The internal sGTM prefix. The browser never sends it as it is: the shim encodes every request
- * under it into a token, and the Worker decodes the prefix back into the upstream path.
+ * The internal sGTM prefix, also the web container's `server_container_url`. The browser never
+ * sends it as it is: the shim encodes every request under it into a token, and the Worker decodes
+ * the token back into the sGTM path.
  */
-export const PREFIX = {
-	/** Server-side Google Tag Manager; also the web container's `server_container_url`. */
-	sgtm: "/_sgtm",
-} as const;
-
-export type UpstreamName = keyof typeof PREFIX;
-
-/** The prefixes the shim checks. */
-export const PREFIXES: readonly (typeof PREFIX)[UpstreamName][] = Object.values(PREFIX);
-
-export const SGTM_PREFIX = PREFIX.sgtm;
+export const SGTM_PREFIX = "/_sgtm";
 
 /** Mixed into the hash. Changing it moves every site to new paths. */
 const LABEL = "analytics/1";
@@ -46,17 +37,11 @@ export function encodedPrefix(host: string): string {
 }
 
 /**
- * Which upstream a decoded token belongs to, and the path to forward. `/_sgtm/g/collect?v=2`
- * becomes `sgtm` and `/g/collect?v=2`; a path under no prefix, the bare prefix, or one whose
- * remainder starts with `//` (a protocol-relative URL that would leave the upstream) is `null`.
+ * The sGTM path of a decoded token: `/_sgtm/g/collect?v=2` becomes `/g/collect?v=2`. A path
+ * outside the prefix, the bare prefix, or one whose remainder starts with `//` (a
+ * protocol-relative URL that would leave sGTM) is `null`.
  */
-export function matchPrefix(
-	target: string,
-): { readonly name: UpstreamName; readonly path: string } | null {
-	for (const name of Object.keys(PREFIX) as UpstreamName[]) {
-		const prefix = PREFIX[name];
-		if (!target.startsWith(`${prefix}/`) || target.startsWith(`${prefix}//`)) continue;
-		return { name, path: target.slice(prefix.length) };
-	}
-	return null;
+export function sgtmPathOf(target: string): string | null {
+	if (!target.startsWith(`${SGTM_PREFIX}/`) || target.startsWith(`${SGTM_PREFIX}//`)) return null;
+	return target.slice(SGTM_PREFIX.length);
 }

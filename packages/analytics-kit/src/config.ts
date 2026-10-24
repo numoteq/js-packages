@@ -1,6 +1,5 @@
 import { Context, Layer, Result } from "effect";
 
-import { type UpstreamName } from "./paths.js";
 import { decodePart, GtmId, Upstream } from "./schema.js";
 import { toTarget, type UpstreamInput, type UpstreamTarget } from "./upstream.js";
 
@@ -19,7 +18,7 @@ export interface AnalyticsOptions {
 
 export interface ResolvedOptions {
 	readonly gtmId: string | undefined;
-	readonly upstreams: Partial<Record<UpstreamName, UpstreamTarget>>;
+	readonly sgtm: UpstreamTarget | undefined;
 	/** Why a part is off, in plain language; logged once when the proxy is created. */
 	readonly warnings: readonly string[];
 }
@@ -47,7 +46,7 @@ export function resolveOptions(options: AnalyticsOptions): ResolvedOptions {
 
 	return {
 		gtmId: Result.isSuccess(gtmId) ? gtmId.success : undefined,
-		upstreams: Result.isSuccess(sgtm) ? { sgtm: toTarget(sgtm.success) } : {},
+		sgtm: Result.isSuccess(sgtm) ? toTarget(sgtm.success) : undefined,
 		warnings: [gtmId, sgtm].flatMap((part) => (Result.isFailure(part) ? [part.failure] : [])),
 	};
 }

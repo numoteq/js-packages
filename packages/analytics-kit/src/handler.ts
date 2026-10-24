@@ -1,15 +1,8 @@
 import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effect";
 
 import { decodeToken } from "./codec.js";
-import { ProxyConfig, type UpstreamBinding } from "./config.js";
-import {
-	encodedPrefix,
-	loaderPath,
-	matchPrefix,
-	PREFIXES,
-	SGTM_PREFIX,
-	type UpstreamName,
-} from "./paths.js";
+import { ProxyConfig } from "./config.js";
+import { encodedPrefix, loaderPath, SGTM_PREFIX, sgtmPathOf } from "./paths.js";
 import {
 	concatBytes,
 	isJavaScript,
@@ -18,7 +11,7 @@ import {
 	upstreamHeaders,
 } from "./rewrite.js";
 import { renderShim } from "./shim.js";
-import { callUpstream } from "./upstream.js";
+import { callUpstream, type UpstreamTarget } from "./upstream.js";
 
 const encoder = new TextEncoder();
 
@@ -32,36 +25,30 @@ export class UpstreamUnavailable extends Schema.TaggedError<UpstreamUnavailable>
 	{ reason: Schema.String, cause: Schema.optional(Schema.Defect()) },
 ) {}
 
-/** The encoded path segment is not a token the shim issued, or names no forwarded upstream. */
+/** The encoded path segment is not a token the shim issued, or not a path under the sGTM prefix. */
 export class InvalidToken extends Schema.TaggedError<InvalidToken>()("InvalidToken", {}) {}
 
-/** One upstream, reached through a binding or a base URL. */
-export interface UpstreamClient {
+/** sGTM, reached through a binding or a base URL. */
+export interface SgtmClient {
 	readonly fetch: (path: string, init: RequestInit) => Effect.Effect<Response, UpstreamUnavailable>;
 }
 
-/** The configured upstreams. A prefix without one answers 404. */
-export class Upstreams extends Context.Service<
-	Upstreams,
-	{ readonly get: (name: UpstreamName) => Option.Option<UpstreamClient> }
->()("@numoteq/analytics-kit-kit/upstreams") {
-	static layer(
-		upstreams: Partial<Record<UpstreamName, UpstreamBinding | URL>>,
-	): Layer.Layer<Upstreams> {
-		const clients = new Map<UpstreamName, UpstreamClient>();
-		for (const [name, upstream] of Object.entries(upstreams) as [
-			UpstreamName,
-			UpstreamBinding | URL,
-		][]) {
-			clients.set(name, {
-				fetch: (path, init) =>
-					Effect.tryPromise({
-						try: (signal) => callUpstream(upstream, path, { ...init, signal }),
-						catch: (cause) => new UpstreamUnavailable({ reason: `${name} fetch failed`, cause }),
-					}),
-			});
-		}
-		return Layer.succeed(Upstreams, { get: (name) => Option.fromNullishOr(clients.get(name)) });
+/** The configured sGTM; without it the loader is empty and the prefix answers 404. */
+export class Sgtm extends Context.Service<Sgtm, { readonly client: Option.Option<SgtmClient> }>()(
+	"@numoteq/analytics-kit-kit/sgtm",
+) {
+	static layer(target: UpstreamTarget | undefined): Layer.Layer<Sgtm> {
+		return Layer.succeed(Sgtm, {
+			client: Option.fromNullishOr(target).pipe(
+				Option.map((upstream): SgtmClient => ({
+					fetch: (path, init) =>
+						Effect.tryPromise({
+							try: (signal) => callUpstream(upstream, path, { ...init, signal }),
+							catch: (cause) => new UpstreamUnavailable({ reason: "sgtm fetch failed", cause }),
+						}),
+				})),
+			),
+		});
 	}
 }
 
@@ -96,9 +83,7 @@ export type Route = "loader" | "encoded" | "denied";
 export function routeOf(url: URL): Route | null {
 	if (url.pathname === loaderPath(url.host)) return "loader";
 	if (url.pathname.startsWith(encodedPrefix(url.host))) return "encoded";
-	if (PREFIXES.some((prefix) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`))) {
-		return "denied";
-	}
+	if (url.pathname === SGTM_PREFIX || url.pathname.startsWith(`${SGTM_PREFIX}/`)) return "denied";
 	return null;
 }
 
@@ -159,10 +144,9 @@ const serveLoader = Effect.fn("analytics.loader")(function* (
 	clientIp: string | undefined,
 ) {
 	const { gtmId } = yield* ProxyConfig;
-	const upstreams = yield* Upstreams;
 	const cache = yield* ResponseCache;
 
-	const upstream = Option.getOrUndefined(upstreams.get("sgtm"));
+	const upstream = Option.getOrUndefined((yield* Sgtm).client);
 	if (gtmId === undefined || upstream === undefined) return emptyLoader();
 
 	const url = new URL(request.url);
@@ -212,20 +196,19 @@ const forwardEncoded = Effect.fn("analytics.forward")(function* (
 	request: Request,
 	clientIp: string | undefined,
 ) {
-	const upstreams = yield* Upstreams;
 	const url = new URL(request.url);
 	const target = decodeToken(url.pathname.slice(encodedPrefix(url.host).length));
 	if (target === null) return yield* new InvalidToken();
 
-	const matched = matchPrefix(target);
-	if (matched === null) return yield* new InvalidToken();
+	const path = sgtmPathOf(target);
+	if (path === null) return yield* new InvalidToken();
 
-	const upstream = Option.getOrUndefined(upstreams.get(matched.name));
+	const upstream = Option.getOrUndefined((yield* Sgtm).client);
 	if (upstream === undefined) return empty(404);
 
 	const hasBody = request.method !== "GET" && request.method !== "HEAD";
 	return yield* Effect.gen(function* () {
-		const answer = yield* upstream.fetch(matched.path, {
+		const answer = yield* upstream.fetch(path, {
 			method: request.method,
 			headers: upstreamHeaders(request, clientIp),
 			body: hasBody ? request.body : null,
@@ -252,7 +235,7 @@ export const handle = (request: Request) => {
 	const routed: Effect.Effect<
 		Response,
 		UpstreamUnavailable | InvalidToken,
-		ProxyConfig | Upstreams | ResponseCache
+		ProxyConfig | Sgtm | ResponseCache
 	> =
 		route === "loader"
 			? serveLoader(request, clientIp)

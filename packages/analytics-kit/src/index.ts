@@ -1,7 +1,7 @@
 import { Effect, Layer, Logger, ManagedRuntime, Option, Result } from "effect";
 
 import { ProxyConfig, resolveOptions, type AnalyticsOptions } from "./config.js";
-import { handle as handleRequest, ResponseCache, Upstreams } from "./handler.js";
+import { handle as handleRequest, ResponseCache, Sgtm } from "./handler.js";
 import {
 	ServerEvents,
 	promiseSender,
@@ -11,8 +11,7 @@ import {
 } from "./server/send.js";
 
 export type { AnalyticsOptions, UpstreamBinding, UpstreamInput } from "./config.js";
-export { loaderPath, PREFIX, PREFIXES, SGTM_PREFIX } from "./paths.js";
-export type { UpstreamName } from "./paths.js";
+export { loaderPath, SGTM_PREFIX } from "./paths.js";
 export {
 	createServerEvents,
 	gcsOf,
@@ -48,7 +47,7 @@ export interface AnalyticsClient {
 	readonly send: ServerEventsClient["send"];
 }
 
-type ProxyServices = ProxyConfig | Upstreams | ResponseCache;
+type ProxyServices = ProxyConfig | Sgtm | ResponseCache;
 type AnalyticsRuntime<R> = ManagedRuntime.ManagedRuntime<R, never>;
 
 const logger = Logger.layer([Logger.consoleJson]);
@@ -93,7 +92,7 @@ export function createAnalytics(options: AnalyticsClientOptions): AnalyticsClien
 
 	const proxyLayers = Layer.mergeAll(
 		ProxyConfig.layer(resolved),
-		Upstreams.layer(resolved.upstreams),
+		Sgtm.layer(resolved.sgtm),
 		ResponseCache.workers,
 	);
 	const logWarnings = <R>(runtime: AnalyticsRuntime<R>) => {

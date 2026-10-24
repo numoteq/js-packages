@@ -4,7 +4,7 @@ import { TestClock } from "effect/testing";
 
 import { encodeToken } from "../src/codec.js";
 import { type AnalyticsOptions, ProxyConfig, resolveOptions } from "../src/config.js";
-import { handle, ResponseCache, routeOf, Upstreams } from "../src/handler.js";
+import { handle, ResponseCache, routeOf, Sgtm } from "../src/handler.js";
 import { encodedPrefix, loaderPath } from "../src/paths.js";
 
 const origin = "https://site.example";
@@ -65,7 +65,7 @@ const runWith = (request: Request, setup: Setup) => {
 	const cache = setup.cache ?? memoryCache();
 	return handle(request).pipe(
 		Effect.provide(
-			Layer.mergeAll(ProxyConfig.layer(resolved), Upstreams.layer(resolved.upstreams), cache.layer),
+			Layer.mergeAll(ProxyConfig.layer(resolved), Sgtm.layer(resolved.sgtm), cache.layer),
 		),
 	);
 };
@@ -118,7 +118,7 @@ describe("handle", () => {
 				);
 				expect(body.startsWith("(function (window) {")).toBe(true);
 				expect(body).toContain(JSON.stringify(encodedPath));
-				expect(body).toContain(JSON.stringify(["/_sgtm/"]));
+				expect(body).toContain(`var PREFIX = "/_sgtm/"`);
 				expect(body).toContain('var h="https://site.example/_sgtm/gtag/js"');
 				expect(body).toContain('"21":"site.example/_sgtm"');
 				expect(body).not.toContain("googletagmanager.com");
