@@ -1,5 +1,11 @@
 # @numoteq/analytics-kit
 
+## 1.2.2
+
+### Patch Changes
+
+- b28fe13: Drop the leftovers of several upstreams: the `PREFIX`, `PREFIXES` and `UpstreamName` exports are removed (use `SGTM_PREFIX`), and the proxy keeps one optional sGTM client instead of a map of upstreams. Behaviour is unchanged.
+
 ## 1.2.1
 
 ### Patch Changes
