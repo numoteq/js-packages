@@ -1,5 +1,11 @@
 # @numoteq/analytics-kit
 
+## 1.2.1
+
+### Patch Changes
+
+- f2bfb3e: Remove the `apiSecret` and `apiSecretVar` options: server events go to our sGTM, which forwards them to GA4 like browser hits and never needs Google's Measurement Protocol `api_secret`.
+
 ## 1.2.0
 
 ### Minor Changes
