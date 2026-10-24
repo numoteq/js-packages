@@ -45,8 +45,6 @@ export interface ServerEventsOptions {
 	readonly upstream?: UpstreamInput | undefined;
 	/** Path of the Measurement Protocol client. Default `/mp/collect`. */
 	readonly path?: string | undefined;
-	/** Passed through as `api_secret`. The self-hosted container accepts any value itself. */
-	readonly apiSecret?: string | undefined;
 	readonly timeout?: Duration.Duration | undefined;
 }
 
@@ -54,7 +52,6 @@ export interface ServerEventsOptions {
 export interface ServerEventsSettings {
 	readonly target: UpstreamTarget;
 	readonly path: string;
-	readonly apiSecret?: string | undefined;
 	readonly timeout: Duration.Duration;
 }
 
@@ -146,13 +143,6 @@ const payloadOf = (context: RequestContext, event: ServerEvent) =>
 		};
 	});
 
-function queryOf(settings: ServerEventsSettings, context: RequestContext): string {
-	const query = new URLSearchParams();
-	if (settings.apiSecret) query.set("api_secret", settings.apiSecret);
-	query.set("gcs", gcsOf(context.consent));
-	return query.toString();
-}
-
 /**
  * The visitor's address, browser and consented cookies as headers too, the way the proxy forwards
  * a browser hit, so sGTM tags read them alike whatever the Measurement Protocol client maps.
@@ -182,7 +172,7 @@ const requestOf = Effect.fn("analytics.serverEvent")(function* (
 	event: ServerEvent,
 ) {
 	const body = yield* payloadOf(context, event);
-	const path = `${settings.path}?${queryOf(settings, context)}`;
+	const path = `${settings.path}?${new URLSearchParams({ gcs: gcsOf(context.consent) })}`;
 	// The timeout covers reading a refusal's body too, not just the response headers.
 	const refusal = yield* Effect.tryPromise({
 		try: async (signal) => {
@@ -238,7 +228,6 @@ export function resolveServerEventsOptions(
 	return Result.succeed({
 		target: toTarget(upstream.success),
 		path: path.success ?? DEFAULT_PATH,
-		apiSecret: options.apiSecret,
 		timeout: options.timeout ?? DEFAULT_TIMEOUT,
 	});
 }

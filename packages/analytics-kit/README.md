@@ -58,7 +58,7 @@ Server events are on whenever `SGTM_UPSTREAM` is set; the middleware sets `local
 analytics({
 	gtmIdVar: "WEB_GTM",
 	sgtmBinding: "TAGGING",
-	serverEvents: { apiSecretVar: "MP_SECRET" },
+	serverEvents: { path: "/events" },
 });
 ```
 
@@ -113,7 +113,7 @@ Web container:
 
 Conversions the backend confirms (a lead stored, an order paid) are sent from the Worker, not the browser: they survive ad blockers and closed tabs. The event originates on the server and goes through sGTM, which routes it to GA4, Meta CAPI, Umami and OpenPanel like any other hit.
 
-Server container: add a **Measurement Protocol** client and note its activation path. Give the sender that path (default `/mp/collect`). The Worker knows nothing about the destinations: the GA4 measurement id, the Umami website, the Meta pixel and the rest are set in the server container's tags. `api_secret` is an optional pass-through field; the container itself accepts any value.
+Server container: add a **Measurement Protocol** client and note its activation path. Give the sender that path (default `/mp/collect`). The Worker knows nothing about the destinations: the GA4 measurement id, the Umami website, the Meta pixel and the rest are set in the server container's tags. No `api_secret` either: sGTM forwards to GA4 the way it forwards browser hits, not through Google's Measurement Protocol endpoint.
 
 ```ts
 // an Astro action or API route, after the lead is stored

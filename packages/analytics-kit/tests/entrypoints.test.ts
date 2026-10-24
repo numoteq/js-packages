@@ -86,13 +86,7 @@ describe("@numoteq/analytics-kit/astro", () => {
 	});
 
 	it("passes server event options through", () => {
-		const { source } = setup({
-			serverEvents: {
-				apiSecretVar: "MP_SECRET",
-				path: "/mp/collect",
-			},
-		});
-		expect(source).toContain('env["MP_SECRET"]');
-		expect(source).toContain('"/mp/collect"');
+		const { source } = setup({ serverEvents: { path: "/events" } });
+		expect(source).toContain('"/events"');
 	});
 });

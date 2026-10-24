@@ -122,7 +122,6 @@ const settings = (
 ): ServerEventsSettings => ({
 	target: fake.binding,
 	path: "/mp/collect",
-	apiSecret: "secret",
 	timeout: Duration.seconds(5),
 	...overrides,
 });
@@ -169,7 +168,7 @@ describe("send", () => {
 
 			expect(fake.calls).toHaveLength(1);
 			const [call] = fake.calls;
-			expect(call!.path).toBe("/mp/collect?api_secret=secret&gcs=G111");
+			expect(call!.path).toBe("/mp/collect?gcs=G111");
 			expect(call!.headers.get("x-forwarded-for")).toBe("203.0.113.9");
 			expect(call!.headers.get("user-agent")).toBe("Mozilla/5.0");
 			expect(call!.headers.get("cookie")).toBe(COOKIES);
@@ -413,8 +412,7 @@ describe("createServerEvents", () => {
 			);
 
 			expect(fake.calls).toHaveLength(1);
-			expect(fake.calls[0]!.path).toContain("gcs=G101");
-			expect(fake.calls[0]!.path).not.toContain("api_secret");
+			expect(fake.calls[0]!.path).toBe("/mp/collect?gcs=G101");
 		}),
 	);
 

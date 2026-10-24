@@ -3,8 +3,6 @@ import type { AstroIntegration } from "astro";
 export interface ServerEventsAstroOptions {
 	/** Path of the Measurement Protocol client. Default `/mp/collect`. */
 	readonly path?: string;
-	/** Worker var with the API secret for the GA4 forward. */
-	readonly apiSecretVar?: string;
 }
 
 export interface AnalyticsAstroOptions {
@@ -61,16 +59,6 @@ function middlewareSource(
 	sgtmBinding: string,
 	serverEvents: ServerEventsAstroOptions,
 ): string {
-	const settings = [
-		`path: ${JSON.stringify(serverEvents.path ?? "/mp/collect")},`,
-		serverEvents.apiSecretVar === undefined
-			? undefined
-			: `apiSecret: env[${JSON.stringify(serverEvents.apiSecretVar)}],`,
-	]
-		.filter((line) => line !== undefined)
-		.map((line) => `\t\t\t${line}`)
-		.join("\n");
-
 	return `import { env } from "cloudflare:workers";
 import { createAnalytics } from "@numoteq/analytics-kit";
 
@@ -80,9 +68,7 @@ function getClient() {
 	instance ??= createAnalytics({
 		gtmId: env[${JSON.stringify(gtmIdVar)}],
 		sgtm: env[${JSON.stringify(sgtmBinding)}],
-		serverEvents: {
-${settings}
-		},
+		serverEvents: { path: ${JSON.stringify(serverEvents.path ?? "/mp/collect")} },
 	});
 	return instance;
 }
