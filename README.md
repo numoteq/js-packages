@@ -8,11 +8,8 @@ npm packages by NUMOTEQ, maintained in a public pnpm monorepo and published unde
 | --- | --- | --- |
 | [`@numoteq/analytics-kit`](packages/analytics-kit) | First-party analytics for Cloudflare Workers and Astro: a proxy to self-hosted sGTM, server events, and a c15t preset. | Active |
 | [`@numoteq/emdash-plugin-ahasend`](packages/emdash-plugin-ahasend) | EmDash plugin that delivers transactional email through the AhaSend API. | Active |
-| [`@numoteq/sgtm-proxy`](packages/sgtm-proxy) | First-party, ad-blocker-resistant proxy from a Cloudflare Worker to self-hosted server-side Google Tag Manager. | Active |
 
-`@numoteq/analytics-kit` succeeds `@numoteq/sgtm-proxy`, which stays published until the sites migrate to it.
-
-`@numoteq/emdash-plugin-sgtm` was renamed to `@numoteq/sgtm-proxy`. `@numoteq/emdash-plugin-jetemail` and `@numoteq/emdash-plugin-forward-email` were removed on 2026-10-19 and are deprecated on npm in favour of `@numoteq/emdash-plugin-ahasend`.
+`@numoteq/sgtm-proxy` (formerly `@numoteq/emdash-plugin-sgtm`) was removed on 2026-10-25 and is deprecated on npm in favour of `@numoteq/analytics-kit`. `@numoteq/emdash-plugin-jetemail` and `@numoteq/emdash-plugin-forward-email` were removed on 2026-10-19 and are deprecated on npm in favour of `@numoteq/emdash-plugin-ahasend`.
 
 ## Development
 
