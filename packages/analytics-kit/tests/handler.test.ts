@@ -366,7 +366,9 @@ describe("handle", () => {
 			Effect.gen(function* () {
 				const fake = upstream(() => new Response(null, { status: 204 }));
 				const request = new Request(encoded("/_sgtm/g/collect?v=2"), {
-					headers: { cookie: `c15t=v=3&b=cabcdefgh&me=1.${AT}.0&mk=0.${AT}.0; _ga=1; _fbp=2` },
+					headers: {
+						cookie: `c15t=v=3&sid=abc&b=cabcdefgh&me=1.${AT}.0&mk=0.${AT}.0; _ga=1; _fbp=2`,
+					},
 				});
 
 				expect(setCookies(yield* run(request, fake))).toEqual([
@@ -382,7 +384,9 @@ describe("handle", () => {
 					() => new Response(null, { status: 204, headers: { "set-cookie": "FPGSID=kept" } }),
 				);
 				const request = new Request(encoded("/_sgtm/g/collect?v=2"), {
-					headers: { cookie: `c15t=v=3&b=cabcdefgh&me=1.${AT}.0&mk=1.${AT}.0; _ga=1; _fbp=2` },
+					headers: {
+						cookie: `c15t=v=3&sid=abc&b=cabcdefgh&me=1.${AT}.0&mk=1.${AT}.0; _ga=1; _fbp=2`,
+					},
 				});
 
 				expect(setCookies(yield* run(request, fake))).toEqual(["FPGSID=kept"]);

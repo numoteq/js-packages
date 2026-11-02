@@ -37,6 +37,19 @@ describe("c15tPreset", () => {
 		expect(preset.consentCategories).toEqual(["necessary"]);
 		expect(preset.mode).toMatchObject({ type: "offline" });
 	});
+
+	it("clears the browser-readable cookies of a withdrawn category", () => {
+		expect(c15tPreset().clearOnRevocation).toEqual({
+			measurement: { cookies: ["_ga", "_ga_*", "_gid"] },
+			marketing: { cookies: ["_gcl_*", "_fbp", "_fbc", "_gtmeec"] },
+		});
+	});
+
+	it("lets a site override the revocation targets", () => {
+		const preset = c15tPreset({ clearOnRevocation: { marketing: { cookies: ["_custom"] } } });
+
+		expect(preset.clearOnRevocation).toEqual({ marketing: { cookies: ["_custom"] } });
+	});
 });
 
 describe("gtmScript", () => {

@@ -85,6 +85,14 @@ export function filterCookies(header: string | null): string {
 /** Analytics storage among the allowed cookies; the rest of them are ad storage. */
 export const ANALYTICS_COOKIE = /^(_ga$|_ga_|_gid$|FPID$|FPLC$|FPGSID$)/;
 
+/**
+ * The same allowlist as name patterns (`*` is a prefix), for the consent manager's own cleanup in
+ * the browser. It only reaches cookies JavaScript can see: `FPID`, `FPLC` and `FPGSID` are set
+ * `HttpOnly`, so they are covered by the server-side expiry in `cookies.ts` alone.
+ */
+export const MEASUREMENT_COOKIE_PATTERNS = ["_ga", "_ga_*", "_gid"] as const;
+export const MARKETING_COOKIE_PATTERNS = ["_gcl_*", "_fbp", "_fbc", "_gtmeec"] as const;
+
 /** The allowed cookies of the storage the visitor consented to, as a `cookie` header. */
 export function consentedCookies(
 	header: string | undefined,

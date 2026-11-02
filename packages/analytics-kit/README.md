@@ -221,6 +221,14 @@ export default {
 
 `gtmScripts()` is `googleTagManager()` from `@c15t/integrations` with the container URL pointed at our loader: gtm.js is served first-party and the shim is installed before it. It defaults to advanced consent mode (`loadMode: "always"`, category `necessary`), where GTM loads before the visitor chooses and sends cookieless pings to our sGTM. Pass `loadMode: "after-consent"` for basic mode. The container id never reaches the page; the Worker adds the real one from `GTM_ID`.
 
+The client entrypoint must stay exactly this and nothing else: no per-site cookie deletion, no custom revocation code.
+
+```ts
+export default { scripts: gtmScripts() };
+```
+
+`c15tPreset()` sets `clearOnRevocation` for the browser: withdrawing `measurement` deletes `_ga`, `_ga_*` and `_gid`, withdrawing `marketing` deletes `_gcl_*`, `_fbp`, `_fbc` and `_gtmeec`, immediately and without a reload. That only reaches cookies JavaScript can see; see [Cookie cleanup](#cookie-cleanup) for the `HttpOnly` ones and for visitors who never come back to the banner.
+
 ## Cookie cleanup
 
 Consent that is not granted leaves the analytics and marketing cookies behind: GTM's GA4 client sets `FPID` and `FPLC` `HttpOnly`, so JavaScript can neither read nor delete them, and GA sets `_ga` on the registrable domain. The package expires these cookies **on the server**, on every response it touches: page responses through the Astro middleware, and the proxy's loader and hit responses.
@@ -232,7 +240,7 @@ A cookie is expired when its storage is not granted. Each expiry is appended twi
 
 Consent comes from c15t: in Astro from `locals.c15t.snapshot.effectivePermissions` after c15t's middleware ran; on a proxy response, where no middleware runs, from c15t's consent cookie (`c15t`, or the legacy `privacy-consent-storage`) parsed the way c15t stores it. A missing, unreadable or malformed record counts as denied.
 
-Sites must **not** implement their own cookie deletion, in JavaScript or in another middleware. This is the one shared mechanism; per-site deletions drift, cannot reach `HttpOnly` cookies, and leave the domain-scoped copies alive. Remove them and let the package clean up.
+Sites must **not** implement their own cookie deletion, in JavaScript or in another middleware. This is the one shared mechanism; per-site deletions drift, cannot reach `HttpOnly` cookies, and leave the domain-scoped copies alive. Remove them and let the package clean up. `c15tPreset()` already adds c15t's `clearOnRevocation` for the browser-readable cookies, so `src/c15t.client.ts` stays `export default { scripts: gtmScripts() }` with nothing else, and no page or middleware deletes cookies of its own.
 
 Other frameworks get the pure helper and append the values to their own response:
 

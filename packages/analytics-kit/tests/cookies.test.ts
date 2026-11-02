@@ -5,7 +5,9 @@ import {
 	expireUnconsentedCookies,
 	expiredCookieHeaders,
 	registrableDomain,
+	storageOf,
 } from "../src/cookies.js";
+import { MARKETING_COOKIE_PATTERNS, MEASUREMENT_COOKIE_PATTERNS } from "../src/rewrite.js";
 
 const HOST = "www.example.com";
 const EXPIRES = "Thu, 01 Jan 1970 00:00:00 GMT";
@@ -20,8 +22,29 @@ const v3 = (decisions: Record<string, boolean>) => {
 	const fields = Object.entries(decisions).map(
 		([category, granted]) => `${codes[category as keyof typeof codes]}=${granted ? 1 : 0}.${AT}.0`,
 	);
-	return ["v=3", `b=c${"a".repeat(8)}`, ...fields].join("&");
+	// The order c15t's encoder writes: version, subject, epoch, bases, then the decisions.
+	return ["v=3", "sid=subject", `b=c${"a".repeat(8)}`, ...fields].join("&");
 };
+
+/** A concrete cookie name for an allowlist pattern. */
+const sample = (pattern: string) => pattern.replace(/\*$/u, "TEST");
+
+describe("cookie lists", () => {
+	it("keeps the browser patterns and the server allowlist in step", () => {
+		for (const pattern of MEASUREMENT_COOKIE_PATTERNS) {
+			expect({ pattern, storage: storageOf(sample(pattern)) }).toEqual({
+				pattern,
+				storage: "measurement",
+			});
+		}
+		for (const pattern of MARKETING_COOKIE_PATTERNS) {
+			expect({ pattern, storage: storageOf(sample(pattern)) }).toEqual({
+				pattern,
+				storage: "marketing",
+			});
+		}
+	});
+});
 
 describe("registrableDomain", () => {
 	it.each([
@@ -152,6 +175,8 @@ describe("consentFromCookieHeader", () => {
 		expect(consentFromCookieHeader("c15t=v=4&me=1.1700000000000.0")).toEqual(denied);
 		expect(consentFromCookieHeader(`c15t=v=3&mk=maybe`)).toEqual(denied);
 		expect(consentFromCookieHeader("c15t=v=3&me=1.1700000000000.0&unknown=1")).toEqual(denied);
+		// c15t rejects a decision that has no basis list, so it grants nothing either.
+		expect(consentFromCookieHeader(`c15t=v=3&sid=abc&me=1.${AT}.0`)).toEqual(denied);
 	});
 });
 

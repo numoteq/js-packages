@@ -10,6 +10,7 @@ import {
 import { offline, type C15tAstroOptions, type Script } from "c15t/astro";
 
 import { loaderPath } from "./paths.js";
+import { MARKETING_COOKIE_PATTERNS, MEASUREMENT_COOKIE_PATTERNS } from "./rewrite.js";
 
 export type C15tPreset = C15tAstroOptions;
 
@@ -22,6 +23,15 @@ export function c15tPreset(overrides: C15tAstroOptions = {}): C15tPreset {
 	return {
 		mode: offline(),
 		consentCategories: ["necessary", "measurement", "marketing"],
+		/**
+		 * The browser deletes what JavaScript can see the moment a category is withdrawn, without
+		 * a reload. `HttpOnly` cookies never reach it; the Worker expires those, and the ones left
+		 * after a withdrawal, on the next response.
+		 */
+		clearOnRevocation: {
+			measurement: { cookies: MEASUREMENT_COOKIE_PATTERNS },
+			marketing: { cookies: MARKETING_COOKIE_PATTERNS },
+		},
 		...overrides,
 	};
 }
