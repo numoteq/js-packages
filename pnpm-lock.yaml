@@ -54,8 +54,8 @@ importers:
   packages/emdash-plugin-ahasend:
     dependencies:
       '@ahasend/sdk':
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: 0.4.0
+        version: 0.4.0
     devDependencies:
       '@emdash-cms/plugin-cli':
         specifier: 0.13.4
@@ -75,8 +75,8 @@ importers:
 
 packages:
 
-  '@ahasend/sdk@0.3.0':
-    resolution: {integrity: sha512-6gQkW/fRjlBiJo8lfJ2odsWLj+++L6tFBsZQuM5ZU13m2/SCKSFq5hgZdjEHmSZUbzG6+yqjWeXxxHHITr1ScQ==}
+  '@ahasend/sdk@0.4.0':
+    resolution: {integrity: sha512-iFqv9eSXPGTI+RzG8FnRKjeDOCIu5gitcXevRLwhIjUK+O4gi/KIbtRYGmT0XrAEtnwgrKHf0/cogLu4JGz3tw==}
     engines: {node: '>=22'}
 
   '@astrojs/compiler-binding-android-arm64@0.5.2':
@@ -4448,7 +4448,7 @@ packages:
 
 snapshots:
 
-  '@ahasend/sdk@0.3.0': {}
+  '@ahasend/sdk@0.4.0': {}
 
   '@astrojs/compiler-binding-android-arm64@0.5.2':
     optional: true
