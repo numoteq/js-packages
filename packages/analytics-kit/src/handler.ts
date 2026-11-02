@@ -2,6 +2,7 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 
 import { decodeToken } from "./codec.js";
 import { ProxyConfig } from "./config.js";
+import { expireUnconsentedCookies } from "./cookies.js";
 import { encodedPrefix, loaderPath, SGTM_PREFIX, sgtmPathOf } from "./paths.js";
 import {
 	concatBytes,
@@ -255,7 +256,9 @@ export const handle = (request: Request) => {
 					Effect.as(empty(502)),
 				),
 		}),
-		Effect.map(Option.some),
+		// Every proxy answer carries the expiry of the cookies the visitor did not consent to; the
+		// loader cache holds the answer without them, so appending here keeps the cache reusable.
+		Effect.map((response) => Option.some(expireUnconsentedCookies(response, request))),
 		Effect.withSpan("analytics.request", { attributes: { "analytics.route": route } }),
 	);
 };

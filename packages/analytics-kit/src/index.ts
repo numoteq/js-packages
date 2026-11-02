@@ -11,6 +11,13 @@ import {
 } from "./server/send.js";
 
 export type { AnalyticsOptions, UpstreamBinding, UpstreamInput } from "./config.js";
+export {
+	consentFromCookieHeader,
+	expireUnconsentedCookies,
+	expiredCookieHeaders,
+	registrableDomain,
+	type CookieConsent,
+} from "./cookies.js";
 export { loaderPath, SGTM_PREFIX } from "./paths.js";
 export {
 	createServerEvents,

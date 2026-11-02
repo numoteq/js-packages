@@ -78,6 +78,17 @@ const encoded = (plain: string) =>
 
 const status = (response: Option.Option<Response>) => Option.getOrThrow(response).status;
 
+const AT = 1_700_000_000_000;
+
+const setCookies = (response: Option.Option<Response>) =>
+	Option.getOrThrow(response).headers.getSetCookie();
+
+/** The `Set-Cookie` value the cleanup appends for `name`. */
+const expiring = (name: string, domain?: string) =>
+	`${name}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT${
+		domain === undefined ? "" : `; Domain=${domain}`
+	}`;
+
 describe("routeOf", () => {
 	it("names the proxy's own paths and leaves the site's alone", () => {
 		const table: [string, string | null][] = [
@@ -328,6 +339,82 @@ describe("handle", () => {
 				yield* TestClock.adjust("5 seconds");
 				expect(status(yield* Fiber.join(fiber))).toBe(502);
 				expect(fake.calls).toHaveLength(1);
+			}),
+		);
+	});
+
+	describe("cookie cleanup", () => {
+		it.effect("expires non-consented cookies on a proxy answer, without locals", () =>
+			Effect.gen(function* () {
+				const fake = upstream(() => new Response(null, { status: 204 }));
+				const request = new Request(encoded("/_sgtm/g/collect?v=2"), {
+					headers: { cookie: "_ga=1; FPID=2; _fbp=3" },
+				});
+
+				expect(setCookies(yield* run(request, fake))).toEqual([
+					expiring("_ga"),
+					expiring("_ga", "site.example"),
+					expiring("FPID"),
+					expiring("FPID", "site.example"),
+					expiring("_fbp"),
+					expiring("_fbp", "site.example"),
+				]);
+			}),
+		);
+
+		it.effect("expires only what the c15t cookie does not grant", () =>
+			Effect.gen(function* () {
+				const fake = upstream(() => new Response(null, { status: 204 }));
+				const request = new Request(encoded("/_sgtm/g/collect?v=2"), {
+					headers: { cookie: `c15t=v=3&b=cabcdefgh&me=1.${AT}.0&mk=0.${AT}.0; _ga=1; _fbp=2` },
+				});
+
+				expect(setCookies(yield* run(request, fake))).toEqual([
+					expiring("_fbp"),
+					expiring("_fbp", "site.example"),
+				]);
+			}),
+		);
+
+		it.effect("expires nothing with full consent and keeps sGTM's own Set-Cookie", () =>
+			Effect.gen(function* () {
+				const fake = upstream(
+					() => new Response(null, { status: 204, headers: { "set-cookie": "FPGSID=kept" } }),
+				);
+				const request = new Request(encoded("/_sgtm/g/collect?v=2"), {
+					headers: { cookie: `c15t=v=3&b=cabcdefgh&me=1.${AT}.0&mk=1.${AT}.0; _ga=1; _fbp=2` },
+				});
+
+				expect(setCookies(yield* run(request, fake))).toEqual(["FPGSID=kept"]);
+			}),
+		);
+
+		it.effect("appends the expiries next to sGTM's own Set-Cookie", () =>
+			Effect.gen(function* () {
+				const fake = upstream(
+					() => new Response(null, { status: 204, headers: { "set-cookie": "FPGSID=kept" } }),
+				);
+				const request = new Request(encoded("/_sgtm/g/collect?v=2"), {
+					headers: { cookie: "_fbp=2" },
+				});
+
+				expect(setCookies(yield* run(request, fake))).toEqual([
+					"FPGSID=kept",
+					expiring("_fbp"),
+					expiring("_fbp", "site.example"),
+				]);
+			}),
+		);
+
+		it.effect("cleans up the loader answer too", () =>
+			Effect.gen(function* () {
+				const fake = upstream(() => script());
+				const request = new Request(`${origin}${loader}`, { headers: { cookie: "FPID=1" } });
+
+				expect(setCookies(yield* run(request, fake))).toEqual([
+					expiring("FPID"),
+					expiring("FPID", "site.example"),
+				]);
 			}),
 		);
 	});

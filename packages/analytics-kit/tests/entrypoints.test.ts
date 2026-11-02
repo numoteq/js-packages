@@ -51,7 +51,6 @@ describe("@numoteq/analytics-kit/astro", () => {
 		expect(order).toBe("pre");
 		expect(resolved.startsWith("\0")).toBe(true);
 		expect(source).toContain('import { env } from "cloudflare:workers";');
-		expect(source).toContain('import { createAnalytics } from "@numoteq/analytics-kit";');
 		expect(source).toContain('env["GTM_ID"]');
 		expect(source).toContain('env["SGTM_UPSTREAM"]');
 		expect(source).toContain("createAnalytics(");
@@ -59,6 +58,8 @@ describe("@numoteq/analytics-kit/astro", () => {
 		expect(source).toContain("client.send(");
 		expect(source).toContain("context.locals.cfContext?.waitUntil(sent)");
 		expect(source).toContain("context.locals.analytics");
+		expect(source).toContain("import { createAnalytics, expireUnconsentedCookies }");
+		expect(source).toContain("return expireUnconsentedCookies(");
 		expect(source).toContain("context.locals.c15t?.snapshot?.effectivePermissions");
 	});
 

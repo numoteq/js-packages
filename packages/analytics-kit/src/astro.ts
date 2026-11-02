@@ -60,7 +60,7 @@ function middlewareSource(
 	serverEvents: ServerEventsAstroOptions,
 ): string {
 	return `import { env } from "cloudflare:workers";
-import { createAnalytics } from "@numoteq/analytics-kit";
+import { createAnalytics, expireUnconsentedCookies } from "@numoteq/analytics-kit";
 
 let instance;
 
@@ -76,6 +76,7 @@ function getClient() {
 export async function onRequest(context, next) {
 	const client = getClient();
 	const handled = await client.handle(context.request);
+	// The proxy answer already carries its cookie cleanup; it never sees \`locals\`.
 	if (handled) return handled;
 
 	// Consent is read per event: c15t's middleware runs after this one, so nothing is in
@@ -92,7 +93,14 @@ export async function onRequest(context, next) {
 		},
 	};
 
-	return next();
+	// c15t's middleware has run by now, so the snapshot is the request's consent. Without c15t,
+	// the helper reads c15t's consent cookie instead, and nothing granted counts as denied.
+	const response = await next();
+	return expireUnconsentedCookies(
+		response,
+		context.request,
+		context.locals.c15t?.snapshot?.effectivePermissions,
+	);
 }
 `;
 }

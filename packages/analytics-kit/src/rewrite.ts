@@ -3,7 +3,8 @@
 const encoder = new TextEncoder();
 
 /** Cookies forwarded to sGTM. Everything else stays between the browser and the site. */
-const COOKIE_ALLOW = /^(_ga|_gid|_gcl_|_fbp$|_fbc$|FPID$|FPLC$|FPAU$|FPGCL|FPGSID$|_gtmeec$)/;
+export const COOKIE_ALLOW =
+	/^(_ga|_gid|_gcl_|_fbp$|_fbc$|FPID$|FPLC$|FPAU$|FPGCL|FPGSID$|_gtmeec$)/;
 
 /** Never forwarded: credentials of the site and the hop-by-hop address chain we rebuild. */
 const DROPPED = new Set(["authorization", "proxy-authorization", "cookie", "x-forwarded-for"]);
@@ -82,7 +83,7 @@ export function filterCookies(header: string | null): string {
 }
 
 /** Analytics storage among the allowed cookies; the rest of them are ad storage. */
-const ANALYTICS_COOKIE = /^(_ga$|_ga_|_gid$|FPID$|FPLC$|FPGSID$)/;
+export const ANALYTICS_COOKIE = /^(_ga$|_ga_|_gid$|FPID$|FPLC$|FPGSID$)/;
 
 /** The allowed cookies of the storage the visitor consented to, as a `cookie` header. */
 export function consentedCookies(

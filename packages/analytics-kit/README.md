@@ -221,12 +221,42 @@ export default {
 
 `gtmScripts()` is `googleTagManager()` from `@c15t/integrations` with the container URL pointed at our loader: gtm.js is served first-party and the shim is installed before it. It defaults to advanced consent mode (`loadMode: "always"`, category `necessary`), where GTM loads before the visitor chooses and sends cookieless pings to our sGTM. Pass `loadMode: "after-consent"` for basic mode. The container id never reaches the page; the Worker adds the real one from `GTM_ID`.
 
+## Cookie cleanup
+
+Consent that is not granted leaves the analytics and marketing cookies behind: GTM's GA4 client sets `FPID` and `FPLC` `HttpOnly`, so JavaScript can neither read nor delete them, and GA sets `_ga` on the registrable domain. The package expires these cookies **on the server**, on every response it touches: page responses through the Astro middleware, and the proxy's loader and hit responses.
+
+- **Measurement:** `_ga`, `_ga_*`, `_gid`, `FPID`, `FPLC`, `FPGSID`.
+- **Marketing:** `_gcl_*`, `_fbp`, `_fbc`, and the rest of the forwarded ads allowlist (`FPAU`, `FPGCL*`, `_gtmeec`).
+
+A cookie is expired when its storage is not granted. Each expiry is appended twice, so the parent-domain cookie dies too: once without `Domain` (the host-only cookie) and once with `Domain=<eTLD+1>` of the request host (`www.example.com` → `example.com`). Existing `Set-Cookie` headers are kept, the body is not touched, and nothing outside the lists is expired, `c15t*` cookies least of all.
+
+Consent comes from c15t: in Astro from `locals.c15t.snapshot.effectivePermissions` after c15t's middleware ran; on a proxy response, where no middleware runs, from c15t's consent cookie (`c15t`, or the legacy `privacy-consent-storage`) parsed the way c15t stores it. A missing, unreadable or malformed record counts as denied.
+
+Sites must **not** implement their own cookie deletion, in JavaScript or in another middleware. This is the one shared mechanism; per-site deletions drift, cannot reach `HttpOnly` cookies, and leave the domain-scoped copies alive. Remove them and let the package clean up.
+
+Other frameworks get the pure helper and append the values to their own response:
+
+```ts
+import { expiredCookieHeaders } from "@numoteq/analytics-kit";
+
+const headers = expiredCookieHeaders(
+	request.headers.get("cookie"),
+	consent,
+	new URL(request.url).host,
+);
+for (const header of headers) response.headers.append("set-cookie", header);
+```
+
+`expiredCookieHeaders(cookieHeader, consent, host)` takes `{ measurement, marketing }` booleans, exactly the c15t categories, and returns the `Set-Cookie` values (empty when there is nothing to expire). `expireUnconsentedCookies(response, request, consent?)` does the same on a `Response`; without `consent` it reads c15t's cookie.
+
+The domain is a small heuristic, not the Public Suffix List: it handles `www.` and the usual two-label suffixes such as `co.uk` or `com.au`, so country domains like `example.cz` are right. Rare multi-label public suffixes, and a host that is itself a public suffix, are not detected; `localhost` and IP literals get only the host-only expiry.
+
 ## Limits
 
 - Requests the browser sends straight to Google or Meta domains (Ads conversion pings, `google.com/ccm`, the Meta pixel) are not proxied. Move those tags into the server container.
 - The shim hooks `fetch` with a string or `URL`, `sendBeacon` and the `src` of script and image elements. It does not hook `XMLHttpRequest`, `setAttribute("src")` or `fetch(new Request(…))`. A script you add to the page must send through the hooked channels to be proxied.
 - The token is obfuscation, not encryption: the shim carries everything needed to decode it. It defeats static URL patterns and authenticates nothing.
-- The proxy is transport only. It does not read, set or bypass consent; keep consent mode and your CMP as they are.
+- The proxy is transport only. It does not set or bypass consent; it reads the visitor's stored decision solely to expire the cookies they did not allow. Keep consent mode and your CMP as they are.
 
 ## Development
 
