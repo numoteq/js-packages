@@ -1,6 +1,6 @@
 {
 	"name": "@numoteq/emdash-plugin-ahasend",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "AhaSend transport provider for EmDash",
 	"keywords": [
 		"ahasend",
