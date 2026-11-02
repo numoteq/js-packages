@@ -1,5 +1,11 @@
 # @numoteq/analytics-kit
 
+## 1.4.0
+
+### Minor Changes
+
+- 862c8e4: expire non-consented analytics and marketing cookies, incl. HttpOnly FPID/FPLC, on every server response, and clear the browser-readable ones immediately on withdrawal through c15t's `clearOnRevocation` in `c15tPreset()`
+
 ## 1.3.0
 
 ### Minor Changes
