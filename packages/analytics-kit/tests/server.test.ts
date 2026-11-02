@@ -121,7 +121,7 @@ const settings = (
 	overrides: Partial<ServerEventsSettings> = {},
 ): ServerEventsSettings => ({
 	target: fake.binding,
-	path: "/mp/collect",
+	path: "/data",
 	timeout: Duration.seconds(5),
 	...overrides,
 });
@@ -160,7 +160,7 @@ const run = (
 	);
 
 describe("send", () => {
-	it.effect("posts a Measurement Protocol hit with enrichment and hashed user data", () =>
+	it.effect("posts a Data Client hit with enrichment and hashed user data", () =>
 		Effect.gen(function* () {
 			const fake = upstream(() => new Response(null, { status: 204 }));
 
@@ -168,35 +168,36 @@ describe("send", () => {
 
 			expect(fake.calls).toHaveLength(1);
 			const [call] = fake.calls;
-			expect(call!.path).toBe("/mp/collect?gcs=G111");
+			expect(call!.path).toBe("/data");
 			expect(call!.headers.get("x-forwarded-for")).toBe("203.0.113.9");
 			expect(call!.headers.get("user-agent")).toBe("Mozilla/5.0");
 			expect(call!.headers.get("cookie")).toBe(COOKIES);
+			expect(call!.headers.get("x-ga-gcs")).toBe("G111");
 
 			const body = JSON.parse(call!.body);
-			expect(body.client_id).toBe("123.456");
-			expect(body.ip_override).toBe("203.0.113.9");
-			expect(body.user_agent).toBe("Mozilla/5.0");
-			expect(body.consent).toEqual({ ad_user_data: "GRANTED", ad_personalization: "GRANTED" });
-			expect(body.events).toEqual([
-				{
-					name: "generate_lead",
-					params: {
-						form_id: "contact",
-						value: 1000,
-						currency: "CZK",
-						page_location: "https://site.example/sluzby",
-						_fbp: "fb.1.1.1",
-					},
-				},
-			]);
+			expect(body).toMatchObject({
+				event_name: "generate_lead",
+				client_id: "123.456",
+				ip_override: "203.0.113.9",
+				user_agent: "Mozilla/5.0",
+				page_location: "https://site.example/sluzby",
+				"x-ga-gcs": "G111",
+				form_id: "contact",
+				value: 1000,
+				currency: "CZK",
+				_fbp: "fb.1.1.1",
+			});
+			expect(body["_fbc"]).toBeUndefined();
 			expect(body.user_data).toEqual({
 				sha256_email_address: sha256("test@example.com"),
 				sha256_phone_number: sha256("420777123456"),
 			});
+			// Measurement Protocol only fields must be gone.
+			expect(body.consent).toBeUndefined();
+			expect(body.events).toBeUndefined();
+			expect(body.timestamp_micros).toBeUndefined();
 			expect(call!.body).not.toContain("test@example.com");
 			expect(call!.body).not.toContain("777 123 456");
-			expect(typeof body.timestamp_micros).toBe("number");
 		}),
 	);
 
@@ -209,10 +210,10 @@ describe("send", () => {
 
 			const body = JSON.parse(fake.calls[0]!.body);
 			expect(body.client_id).toMatch(/^[0-9a-f-]{36}$/);
-			expect(body.events[0].params.page_location).toBeUndefined();
-			expect(body.events[0].params["session_id"]).toBeUndefined();
-			expect(body.consent).toEqual({ ad_user_data: "DENIED", ad_personalization: "DENIED" });
-			expect(fake.calls[0]!.path).toContain("gcs=G100");
+			expect(body.page_location).toBeUndefined();
+			expect(body.session_id).toBeUndefined();
+			expect(body["x-ga-gcs"]).toBe("G100");
+			expect(fake.calls[0]!.path).toBe("/data");
 		}),
 	);
 
@@ -223,7 +224,7 @@ describe("send", () => {
 			yield* run(fake, { ...LEAD, pageLocation: "https://site.example/diky" });
 
 			const body = JSON.parse(fake.calls[0]!.body);
-			expect(body.events[0].params.page_location).toBe("https://site.example/diky");
+			expect(body.page_location).toBe("https://site.example/diky");
 		}),
 	);
 
@@ -260,6 +261,9 @@ describe("send", () => {
 				new Request("https://site.example/api/contact", {
 					headers: {
 						cookie: COOKIES,
+						"cf-connecting-ip": "203.0.113.9",
+						"user-agent": "Mozilla/5.0",
+						referer: "https://site.example/sluzby",
 					},
 				}),
 				{},
@@ -270,10 +274,15 @@ describe("send", () => {
 			const body = JSON.parse(fake.calls[0]!.body);
 			expect(body.user_data).toBeUndefined();
 			expect(body.client_id).toMatch(/^[0-9a-f-]{36}$/);
-			expect(body.events[0].params["_fbp"]).toBeUndefined();
-			expect(body.events[0].params["_fbc"]).toBeUndefined();
+			expect(body["_fbp"]).toBeUndefined();
+			expect(body["_fbc"]).toBeUndefined();
+			// The open part of the hit still describes the visitor and the visit.
+			expect(body.ip_override).toBe("203.0.113.9");
+			expect(body.user_agent).toBe("Mozilla/5.0");
+			expect(body.page_location).toBe("https://site.example/sluzby");
+			expect(body["x-ga-gcs"]).toBe("G100");
 			expect(fake.calls[0]!.headers.has("cookie")).toBe(false);
-			expect(fake.calls[0]!.path).toContain("gcs=G100");
+			expect(fake.calls[0]!.headers.get("x-ga-gcs")).toBe("G100");
 		}),
 	);
 
@@ -296,13 +305,35 @@ describe("send", () => {
 			expect(fake.calls[0]!.headers.get("cookie")).toBe(
 				"_ga=GA1.1.123.456; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0",
 			);
-			expect(body.events[0].params["_fbp"]).toBeUndefined();
+			expect(body["_fbp"]).toBeUndefined();
 			expect(body.user_data).toBeUndefined();
-			expect(fake.calls[0]!.path).toContain("gcs=G101");
+			expect(body["x-ga-gcs"]).toBe("G101");
 		}),
 	);
 
-	it.effect("does not let the event params smuggle a gated identifier", () =>
+	it.effect("sends both Meta cookies and no GA identifier with marketing consent only", () =>
+		Effect.gen(function* () {
+			const fake = upstream(() => new Response(null, { status: 204 }));
+			const context = RequestContext.fromRequest(
+				new Request("https://site.example/api/contact", {
+					headers: { cookie: `${COOKIES}; _fbc=fb.1.1730000000.abc` },
+				}),
+				{ marketing: true },
+			);
+
+			yield* run(fake, LEAD, context);
+
+			const body = JSON.parse(fake.calls[0]!.body);
+			expect(body["_fbp"]).toBe("fb.1.1.1");
+			expect(body["_fbc"]).toBe("fb.1.1730000000.abc");
+			expect(body["x-ga-gcs"]).toBe("G110");
+			expect(fake.calls[0]!.headers.get("cookie")).toContain("_fbc=fb.1.1730000000.abc");
+			// Marketing consent alone is not analytics storage: the `_ga` id stays unused.
+			expect(body.client_id).toMatch(/^[0-9a-f-]{36}$/);
+		}),
+	);
+
+	it.effect("does not let the event params smuggle an identifier or consent", () =>
 		Effect.gen(function* () {
 			const fake = upstream(() => new Response(null, { status: 204 }));
 			const context = RequestContext.fromRequest(
@@ -314,13 +345,31 @@ describe("send", () => {
 				fake,
 				{
 					name: "generate_lead",
-					params: { form_id: "contact", session_id: "999", _fbp: "fb.1.1.1", _fbc: "fb.1.1.2" },
+					params: {
+						form_id: "contact",
+						session_id: "999",
+						client_id: "forged",
+						user_data: { email_address: "jan@example.com" },
+						_fbp: "fb.1.1.1",
+						_fbc: "fb.1.1.2",
+						ip_override: "198.51.100.7",
+						user_agent: "forged-agent",
+						"x-ga-gcs": "G111",
+					},
 				},
 				context,
 			);
 
-			const params = JSON.parse(fake.calls[0]!.body).events[0].params;
-			expect(params).toEqual({ form_id: "contact" });
+			const body = JSON.parse(fake.calls[0]!.body);
+			expect(body).toMatchObject({ event_name: "generate_lead", form_id: "contact" });
+			expect(body.session_id).toBeUndefined();
+			expect(body.client_id).toMatch(/^[0-9a-f-]{36}$/);
+			expect(body.user_data).toBeUndefined();
+			expect(body["_fbp"]).toBeUndefined();
+			expect(body["_fbc"]).toBeUndefined();
+			expect(body.ip_override).toBeUndefined();
+			expect(body.user_agent).toBeUndefined();
+			expect(body["x-ga-gcs"]).toBe("G100");
 		}),
 	);
 
@@ -360,7 +409,7 @@ describe("resolveServerEventsOptions", () => {
 		const binding = { fetch: async () => new Response(null, { status: 204 }) };
 
 		for (const options of [
-			{ upstream: binding, path: "mp/collect" },
+			{ upstream: binding, path: "data" },
 			{ upstream: binding, path: "//evil.example/x" },
 		]) {
 			const resolved = resolveServerEventsOptions(options);
@@ -374,7 +423,7 @@ describe("resolveServerEventsOptions", () => {
 		const binding = upstream(() => new Response(null, { status: 204 })).binding;
 		const resolved = resolveServerEventsOptions({ upstream: binding });
 		if (Result.isFailure(resolved)) throw new Error(resolved.failure);
-		expect(resolved.success.path).toBe("/mp/collect");
+		expect(resolved.success.path).toBe("/data");
 		expect(resolved.success.timeout).toEqual(Duration.seconds(5));
 	});
 });
@@ -412,7 +461,7 @@ describe("createServerEvents", () => {
 			);
 
 			expect(fake.calls).toHaveLength(1);
-			expect(fake.calls[0]!.path).toBe("/mp/collect?gcs=G101");
+			expect(fake.calls[0]!.path).toBe("/data");
 		}),
 	);
 

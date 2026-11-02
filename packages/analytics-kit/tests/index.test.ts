@@ -88,7 +88,7 @@ describe("createAnalytics", () => {
 			{ measurement: true },
 		);
 
-		expect(calls).toEqual(["/mp/collect"]);
+		expect(calls).toEqual(["/data"]);
 	});
 
 	it("passes the session cookies on to sGTM instead of reading them", async () => {
@@ -118,7 +118,7 @@ describe("createAnalytics", () => {
 		expect(sent?.headers.get("cookie")).toBe(
 			"_ga_OTHER=GS1.1.111.1.0.111.0.0.0; _ga_WSNXXNBYV7=GS1.1.1730000000.3.1.1730000300.0.0.0",
 		);
-		expect(JSON.parse(await sent!.text()).events[0].params.session_id).toBeUndefined();
+		expect(JSON.parse(await sent!.text()).session_id).toBeUndefined();
 	});
 
 	it("turns a broken server events setting into a logged no-op", async () => {
@@ -132,7 +132,7 @@ describe("createAnalytics", () => {
 					return script();
 				},
 			},
-			serverEvents: { path: "mp/collect" },
+			serverEvents: { path: "data" },
 		});
 
 		await client.send(new Request(`${origin}/api/lead`), { name: "generate_lead" });

@@ -1,6 +1,5 @@
 import {
 	Cause,
-	Clock,
 	Context,
 	Duration,
 	Effect,
@@ -16,8 +15,8 @@ import { decodePart, optionalPart, Upstream } from "../schema.js";
 import { callUpstream, toTarget, type UpstreamInput, type UpstreamTarget } from "../upstream.js";
 import { RequestContext, type Consent } from "./context.js";
 
-/** The path of the Measurement Protocol client in the server container. */
-const DEFAULT_PATH = "/mp/collect";
+/** The path the Stape Data Client claims in the server container. */
+const DEFAULT_PATH = "/data";
 const DEFAULT_TIMEOUT = Duration.seconds(5);
 
 const ClientPath = Schema.String.check(
@@ -43,7 +42,7 @@ export interface ServerEvent {
 export interface ServerEventsOptions {
 	/** Server-side GTM, the same binding the proxy uses. */
 	readonly upstream?: UpstreamInput | undefined;
-	/** Path of the Measurement Protocol client. Default `/mp/collect`. */
+	/** Path of the Data Client. Default `/data`. */
 	readonly path?: string | undefined;
 	readonly timeout?: Duration.Duration | undefined;
 }
@@ -68,9 +67,9 @@ export class ServerEventUnavailable extends Schema.TaggedError<ServerEventUnavai
 ) {}
 
 /**
- * Server tags read consent from `x-ga-gcs` (the `G1` + ad + analytics triple), never from the MP
- * body's `consent` object, so the sender passes it as the `gcs` query parameter. Missing consent
- * counts as denied.
+ * Server tags read consent from `x-ga-gcs`, the `G1` + ad + analytics triple, the same signal a
+ * browser hit carries. The sender passes it as a header and as event data; missing consent counts
+ * as denied.
  */
 export function gcsOf(consent: Consent): string {
 	return `G1${consent.marketing === true ? "1" : "0"}${consent.measurement === true ? "1" : "0"}`;
@@ -102,41 +101,47 @@ const hashUser = (user: ServerEvent["user"]) =>
 			});
 
 /**
- * The Measurement Protocol body. `page_location` describes the visit; `client_id`, `_fbp`/`_fbc`
- * and `user_data` are the visitor's identifiers. They travel only with the consent they belong
- * to: analytics storage for the GA cookies, marketing for the Meta ones and for the hashes,
- * because a hashed e-mail is still personal data.
+ * Event params a hit may not carry itself: the identifiers and the consent signal below decide
+ * what a visitor allows, so a param must not smuggle one past the consent checks.
+ */
+const RESERVED_PARAMS = [
+	"session_id",
+	"client_id",
+	"user_data",
+	"_fbp",
+	"_fbc",
+	"ip_override",
+	"user_agent",
+	"x-ga-gcs",
+] as const;
+
+/**
+ * The body, in the flat common event data the Data Client maps into the event model. Every
+ * top-level key becomes event data: `page_location` describes the visit; `client_id`,
+ * `_fbp`/`_fbc` and `user_data` are the visitor's identifiers. They travel only with the consent
+ * they belong to: analytics storage for the GA cookies, marketing for the Meta ones and for the
+ * hashes, because a hashed e-mail is still personal data.
  */
 const payloadOf = (context: RequestContext, event: ServerEvent) =>
 	Effect.gen(function* () {
-		const now = yield* Clock.currentTimeMillis;
 		const marketing = context.consent.marketing === true;
-
 		const measurement = context.consent.measurement === true;
+
 		const params: Record<string, unknown> = { ...event.params };
-		// Params of the event must not smuggle an identifier past the consent checks below.
-		delete params["session_id"];
-		delete params["_fbp"];
-		delete params["_fbc"];
+		for (const key of RESERVED_PARAMS) delete params[key];
 
 		const pageLocation = event.pageLocation ?? context.pageLocation;
-		if (pageLocation !== undefined) params["page_location"] = pageLocation;
-		if (marketing) {
-			if (context.fbp !== undefined) params["_fbp"] = context.fbp;
-			if (context.fbc !== undefined) params["_fbc"] = context.fbc;
-		}
-
 		const userData = marketing ? yield* hashUser(event.user) : undefined;
 
 		return {
 			// The cookies of analytics storage: a stale `_ga` after a withdrawal is not consent.
 			client_id: (measurement ? context.clientId : undefined) ?? crypto.randomUUID(),
-			timestamp_micros: now * 1000,
-			events: [{ name: event.name, params }],
-			consent: {
-				ad_user_data: marketing ? "GRANTED" : "DENIED",
-				ad_personalization: marketing ? "GRANTED" : "DENIED",
-			},
+			event_name: event.name,
+			"x-ga-gcs": gcsOf(context.consent),
+			...(pageLocation === undefined ? {} : { page_location: pageLocation }),
+			...params,
+			...(marketing && context.fbp !== undefined ? { _fbp: context.fbp } : {}),
+			...(marketing && context.fbc !== undefined ? { _fbc: context.fbc } : {}),
 			...(userData === undefined ? {} : { user_data: userData }),
 			...(context.ip === undefined ? {} : { ip_override: context.ip }),
 			...(context.userAgent === undefined ? {} : { user_agent: context.userAgent }),
@@ -144,11 +149,14 @@ const payloadOf = (context: RequestContext, event: ServerEvent) =>
 	});
 
 /**
- * The visitor's address, browser and consented cookies as headers too, the way the proxy forwards
- * a browser hit, so sGTM tags read them alike whatever the Measurement Protocol client maps.
+ * The visitor's address, browser, consent and consented cookies as headers too, the way the proxy
+ * forwards a browser hit, so sGTM tags read them alike whatever the Data Client maps.
  */
 function headersOf(context: RequestContext): Record<string, string> {
-	const headers: Record<string, string> = { "content-type": "application/json" };
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+		"x-ga-gcs": gcsOf(context.consent),
+	};
 	if (context.ip !== undefined) headers["x-forwarded-for"] = context.ip;
 	if (context.userAgent !== undefined) headers["user-agent"] = context.userAgent;
 	const cookie = consentedCookies(context.cookie, {
@@ -172,11 +180,10 @@ const requestOf = Effect.fn("analytics.serverEvent")(function* (
 	event: ServerEvent,
 ) {
 	const body = yield* payloadOf(context, event);
-	const path = `${settings.path}?${new URLSearchParams({ gcs: gcsOf(context.consent) })}`;
 	// The timeout covers reading a refusal's body too, not just the response headers.
 	const refusal = yield* Effect.tryPromise({
 		try: async (signal) => {
-			const response = await callUpstream(settings.target, path, {
+			const response = await callUpstream(settings.target, settings.path, {
 				method: "POST",
 				headers: headersOf(context),
 				body: JSON.stringify(body),
@@ -195,7 +202,7 @@ const requestOf = Effect.fn("analytics.serverEvent")(function* (
 	});
 });
 
-/** Sends server-originated events to the Measurement Protocol client of our sGTM. */
+/** Sends server-originated events to the Stape Data Client of our sGTM. */
 export class ServerEvents extends Context.Service<
 	ServerEvents,
 	{

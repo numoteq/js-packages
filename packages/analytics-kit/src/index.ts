@@ -37,7 +37,7 @@ export type ProxyHandler = (request: Request) => Promise<Response | null>;
 export type AnalyticsServerEventsOptions = Omit<ServerEventsOptions, "upstream">;
 
 export interface AnalyticsClientOptions extends AnalyticsOptions {
-	/** Measurement Protocol settings, or `false` for a site that only proxies. */
+	/** Data Client settings, or `false` for a site that only proxies. */
 	readonly serverEvents?: AnalyticsServerEventsOptions | false;
 }
 

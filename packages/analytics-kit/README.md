@@ -3,7 +3,7 @@
 First-party analytics plumbing for sites on Cloudflare Workers and Astro. One package, four parts:
 
 - **A proxy** to self-hosted server-side Google Tag Manager (sGTM), reachable from the page without ad-blocker-shaped URLs.
-- **Server events** that send from an API route or an action through the Measurement Protocol client of our sGTM, with the visitor's identifiers, address and consent.
+- **Server events** that send from an API route or an action through the Stape Data Client of our sGTM, with the visitor's identifiers, address and consent.
 - **A c15t preset** with our consent categories and the container script that loads through the proxy.
 - **Client paths** with no dependencies, for the page.
 
@@ -102,7 +102,7 @@ const response = (await handler(request)) ?? (await site(request));
 Server container:
 
 - **Container Settings → Server container URL:** `https://<site>/_sgtm`. It does not affect routing: the Worker forwards default paths, which sGTM accepts with or without the URL's path.
-- **Clients:** a **Google Tag Manager: Web Container** client allowing your web container id, the **GA4** client, and a **Measurement Protocol** client (see [Server events](#server-events)). Check that `/gtm.js?id=<id>` on sGTM returns JavaScript.
+- **Clients:** a **Google Tag Manager: Web Container** client allowing your web container id, the **GA4** client, and the **Data Client** (see [Server events](#server-events)). Check that `/gtm.js?id=<id>` on sGTM returns JavaScript.
 
 Web container:
 
@@ -113,7 +113,7 @@ Web container:
 
 Conversions the backend confirms (a lead stored, an order paid) are sent from the Worker, not the browser: they survive ad blockers and closed tabs. The event originates on the server and goes through sGTM, which routes it to GA4, Meta CAPI, Umami and OpenPanel like any other hit.
 
-Server container: add a **Measurement Protocol** client and note its activation path. Give the sender that path (default `/mp/collect`). The Worker knows nothing about the destinations: the GA4 measurement id, the Umami website, the Meta pixel and the rest are set in the server container's tags. No `api_secret` either: sGTM forwards to GA4 the way it forwards browser hits, not through Google's Measurement Protocol endpoint.
+Server container: add the **Data Client** by Stape (`stape-io/data-client`, a client template, managed for us by `terraform-analytics`) and note its path. Give the sender that path (default `/data`). The client parses the JSON body into the event data, so top-level keys become event data: `event_name`, `page_location`, `client_id`, the event params, `user_data` and the rest. The Worker knows nothing about the destinations: the GA4 measurement id, the Umami website, the Meta pixel and the rest are set in the server container's tags. No `api_secret` either: sGTM forwards to GA4 the way it forwards browser hits, not through Google's Measurement Protocol endpoint.
 
 ```ts
 // an Astro action or API route, after the lead is stored
@@ -130,7 +130,7 @@ await locals.analytics.event(
 `locals.analytics.event(name, params, options)`:
 
 - sends in the background through `waitUntil`, so the response does not wait for it; the returned promise exists so a test can await it,
-- reads consent at call time from `Astro.locals.c15t.snapshot.effectivePermissions`, because c15t's middleware runs after ours; without c15t everything counts as denied (`gcs=G100`) and you pass consent to `createServerEvents` yourself,
+- reads consent at call time from `Astro.locals.c15t.snapshot.effectivePermissions`, because c15t's middleware runs after ours; without c15t everything counts as denied (`x-ga-gcs=G100`) and you pass consent to `createServerEvents` yourself,
 - never throws: a failed event is logged and dropped.
 
 The sender adds what the browser would have sent, read from the request:
@@ -139,15 +139,35 @@ The sender adds what the browser would have sent, read from the request:
 | --- | --- | --- |
 | `page_location` | the request's `Referer`, or a `pageLocation` you pass | always |
 | `ip_override`, `user_agent`, also as `x-forwarded-for` and `user-agent` headers | `cf-connecting-ip` (or `x-forwarded-for`), `user-agent` | always |
+| `x-ga-gcs`, also as an `x-ga-gcs` header | `G1` + marketing + measurement, the same signal gtag sends | always |
 | `client_id` | `_ga`; a random UUID when there is no cookie or analytics consent | `measurement` |
 | `cookie` header: `_ga`, `_ga_*`, `_gid`, `FPID`, `FPLC`, `FPGSID` | the request's cookies | `measurement` |
 | `cookie` header: the other forwarded cookies (`_gcl_*`, `_fbp`, `_fbc`, …) | the request's cookies | `marketing` |
 | `_fbp` / `_fbc` | the cookies; `_fbc` is rebuilt from `fbclid` when the cookie is not there yet | `marketing` |
 | `user_data.sha256_email_address`, `sha256_phone_number` | `user: { email, phone }`, normalized and SHA-256 hashed in the Worker | `marketing` |
 
-The Worker sends no `session_id`: it would need to know the GA4 property to pick its `_ga_<id>` cookie. The consented cookies go along instead, the same allowlist the proxy forwards, and the server container reads the session from them (for example a Cookie Value variable for `_ga_<id>` and a transformation that sets `ga_session_id` on Measurement Protocol events). A hashed e-mail is still personal data, so it travels only with marketing consent; the plain values never leave the Worker. The IP, the user agent and the page are the open part of the hit (Meta matches on them without cookies) and go out even when nothing is granted.
+With everything granted, the hit looks like this (one event per request, JSON):
 
-Consent goes both ways: the MP body's `consent` object for the record, and the `gcs` query parameter (`G1` + ad + analytics, the same signal gtag sends). Server tags read consent from `x-ga-gcs`, which the Measurement Protocol client builds from `gcs`; the claim comes from the container bytecode, so confirm one hit in the sGTM Preview after you change it.
+```json
+POST /data
+{
+	"event_name": "generate_lead",
+	"client_id": "123456789.1700000000",
+	"page_location": "https://site.example/kontakt",
+	"ip_override": "203.0.113.9",
+	"user_agent": "Mozilla/5.0 …",
+	"x-ga-gcs": "G111",
+	"form_id": "contact",
+	"_fbp": "fb.1.1730000000.1",
+	"user_data": { "sha256_email_address": "…", "sha256_phone_number": "…" }
+}
+```
+
+The event params travel as top-level event data too, like the browser container's own hits; the sender drops `session_id`, `client_id`, `user_data`, `_fbp`, `_fbc`, `ip_override`, `user_agent` and `x-ga-gcs` from them, so a param cannot smuggle an identifier or a consent signal past these rules.
+
+The Worker sends no `session_id`: it would need to know the GA4 property to pick its `_ga_<id>` cookie. The consented cookies go along instead, the same allowlist the proxy forwards, and the server container reads the session from them (for example a Cookie Value variable for `_ga_<id>` and a transformation that sets `ga_session_id` on the event). A hashed e-mail is still personal data, so it travels only with marketing consent; the plain values never leave the Worker. The IP, the user agent and the page are the open part of the hit (Meta matches on them without cookies) and go out even when nothing is granted.
+
+Consent goes as `x-ga-gcs` (`G1` + ad + analytics, the same signal gtag sends), in the body as event data and in the request header, so both kinds of server tags read it the way they read a browser hit. Confirm one hit in the sGTM Preview after you change it.
 
 Without Effect, `createServerEvents(options)` returns `{ send(request, event, consent) }`; it is the sender alone, so it needs `upstream` again. Without an upstream it logs why once and drops events. With Effect, use the `ServerEvents` service; `./server` exports it with `RequestContext`, `gcsOf` and the typed errors:
 
@@ -157,7 +177,7 @@ import { RequestContext, ServerEvents } from "@numoteq/analytics-kit/server";
 
 const program = Effect.gen(function* () {
 	const events = yield* ServerEvents;
-	yield* events.send(RequestContext.fromRequest(request, consent, "G-XXXXXXXXXX"), {
+	yield* events.send(RequestContext.fromRequest(request, consent), {
 		name: "generate_lead",
 		params: { form_id: "contact" },
 	});

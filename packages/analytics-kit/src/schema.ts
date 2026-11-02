@@ -49,7 +49,7 @@ export function decodePart<S extends Schema.ConstraintDecoder<unknown>>(
 
 /**
  * Like {@link decodePart}, but absent is a success: for options that have a default, such as the
- * Measurement Protocol path.
+ * Data Client path.
  */
 export function optionalPart<S extends Schema.ConstraintDecoder<unknown>>(
 	schema: S,

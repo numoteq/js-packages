@@ -1,7 +1,7 @@
 import type { AstroIntegration } from "astro";
 
 export interface ServerEventsAstroOptions {
-	/** Path of the Measurement Protocol client. Default `/mp/collect`. */
+	/** Path of the Data Client. Default `/data`. */
 	readonly path?: string;
 }
 
@@ -68,7 +68,7 @@ function getClient() {
 	instance ??= createAnalytics({
 		gtmId: env[${JSON.stringify(gtmIdVar)}],
 		sgtm: env[${JSON.stringify(sgtmBinding)}],
-		serverEvents: { path: ${JSON.stringify(serverEvents.path ?? "/mp/collect")} },
+		serverEvents: { path: ${JSON.stringify(serverEvents.path ?? "/data")} },
 	});
 	return instance;
 }
