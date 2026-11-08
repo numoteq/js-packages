@@ -92,7 +92,7 @@ const response = (await handler(request)) ?? (await site(request));
 
 - **Loader:** fetched from sGTM with up to two retries and a 10 s timeout per attempt, then cached for 5 minutes in the Workers Cache API. Server-side preview requests (`X-Gtm-Server-Preview`) and responses that set cookies bypass the cache; a preview is answered `Cache-Control: no-store` with `Vary: X-Gtm-Server-Preview`, so no edge cache can hand it to a normal visitor.
 - **Encoded requests:** forwarded once with a 5 s timeout. A hit is never retried, so it cannot count twice.
-- **Headers:** everything the browser sent is forwarded, Cloudflare's `cf-*` included, so sGTM tags can read `cf-ipcountry` and friends. Cookies are narrowed to `_ga*`, `_gid`, `_gcl_*`, `_fbp`, `_fbc`, `FPID`, `FPLC`, `FPAU`, `FPGCL*`, `FPGSID` and `_gtmeec`. `x-forwarded-for`, `-host` and `-proto` describe the original request (the first is rebuilt from `cf-connecting-ip`, so only on Cloudflare), and `authorization` never leaves the site.
+- **Headers:** everything the browser sent is forwarded, Cloudflare's `cf-*` included, so sGTM tags can read `cf-ipcountry` and friends. Cookies are narrowed to `_ga*`, `_gid`, `_gcl_*`, `_fbp`, `_fbc`, `FPID`, `FPLC`, `FPAU`, `FPGCL*`, `FPGSID`, `_gtmeec`, `sznaiid` and `_dm_session_attributes`, plus Seznam's `sid` and `udid` when their values are in Seznam's format (`sid` starts with `id=<digits>`, `udid` is a UUID); a site's own `sid` session cookie never passes. `x-forwarded-for`, `-host` and `-proto` describe the original request (the first is rebuilt from `cf-connecting-ip`, so only on Cloudflare), and `authorization` never leaves the site.
 - **Failures:** an upstream that is unreachable or too slow answers `502` and logs a warning, an unknown token or a path under no prefix `400`, a plain data request under a prefix `404`. The site's own error page never shows.
 - **Turned off:** a part with missing or invalid options logs why once and turns itself off. The loader then answers an empty script with `Cache-Control: no-store`, so pages in previews and local development load quietly.
 - **Logs:** JSON, only for the cases above. Workers Logs already record every request.
@@ -234,7 +234,7 @@ export default { scripts: gtmScripts() };
 Consent that is not granted leaves the analytics and marketing cookies behind: GTM's GA4 client sets `FPID` and `FPLC` `HttpOnly`, so JavaScript can neither read nor delete them, and GA sets `_ga` on the registrable domain. The package expires these cookies **on the server**, on every response it touches: page responses through the Astro middleware, and the proxy's loader and hit responses.
 
 - **Measurement:** `_ga`, `_ga_*`, `_gid`, `FPID`, `FPLC`, `FPGSID`.
-- **Marketing:** `_gcl_*`, `_fbp`, `_fbc`, and the rest of the forwarded ads allowlist (`FPAU`, `FPGCL*`, `_gtmeec`).
+- **Marketing:** `_gcl_*`, `_fbp`, `_fbc`, and the rest of the forwarded ads allowlist (`FPAU`, `FPGCL*`, `_gtmeec`, `sznaiid`, `_dm_session_attributes`). Seznam's `sid` and `udid` are forwarded but never expired: their names are too generic to delete a cookie by name.
 
 A cookie is expired when its storage is not granted. Each expiry is appended twice, so the parent-domain cookie dies too: once without `Domain` (the host-only cookie) and once with `Domain=<eTLD+1>` of the request host (`www.example.com` → `example.com`). Existing `Set-Cookie` headers are kept, the body is not touched, and nothing outside the lists is expired, `c15t*` cookies least of all.
 

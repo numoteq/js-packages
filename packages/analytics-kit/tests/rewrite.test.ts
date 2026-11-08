@@ -47,6 +47,24 @@ describe("filterCookies", () => {
 		).toBe("_ga=GA1.1.1; _ga_ABC=GS1; FPID=x; _fbp=fb");
 		expect(filterCookies(null)).toBe("");
 	});
+
+	it("keeps the Sklik and Google Ads server cookies", () => {
+		expect(filterCookies("sznaiid=123; _dm_session_attributes=abc; other=1")).toBe(
+			"sznaiid=123; _dm_session_attributes=abc",
+		);
+	});
+
+	it("keeps Seznam's sid and udid only in Seznam's format", () => {
+		const udid = "01958f34-71d5-7ec2-ae01-cb3c80a1d0a0";
+		expect(filterCookies(`sid=id=1922397029101872874|t=1737450723.526; udid=${udid}`)).toBe(
+			`sid=id=1922397029101872874|t=1737450723.526; udid=${udid}`,
+		);
+		expect(filterCookies("sid=id%3D1922397029101872874%7Ct%3D1")).toBe(
+			"sid=id%3D1922397029101872874%7Ct%3D1",
+		);
+		expect(filterCookies("sid=s%3Asecret-session; udid=device-1; sid")).toBe("");
+		expect(filterCookies("constructor=x")).toBe("");
+	});
 });
 
 describe("consentedCookies", () => {
@@ -61,6 +79,12 @@ describe("consentedCookies", () => {
 		);
 		expect(consentedCookies(header, { analytics: false, ads: false })).toBe("");
 		expect(consentedCookies(undefined, { analytics: true, ads: true })).toBe("");
+	});
+
+	it("treats Seznam's identity cookies as ad storage", () => {
+		const seznam = "sid=id=1|t=2; udid=01958f34-71d5-7ec2-ae01-cb3c80a1d0a0; sznaiid=3";
+		expect(consentedCookies(seznam, { analytics: true, ads: false })).toBe("");
+		expect(consentedCookies(seznam, { analytics: false, ads: true })).toBe(seznam);
 	});
 });
 

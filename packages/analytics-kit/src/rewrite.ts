@@ -4,7 +4,25 @@ const encoder = new TextEncoder();
 
 /** Cookies forwarded to sGTM. Everything else stays between the browser and the site. */
 export const COOKIE_ALLOW =
-	/^(_ga|_gid|_gcl_|_fbp$|_fbc$|FPID$|FPLC$|FPAU$|FPGCL|FPGSID$|_gtmeec$)/;
+	/^(_ga|_gid|_gcl_|_fbp$|_fbc$|FPID$|FPLC$|FPAU$|FPGCL|FPGSID$|_gtmeec$|sznaiid$|_dm_session_attributes$)/;
+
+/**
+ * Seznam's `sul.js` identity cookies, which its server-to-server measurement needs. Their names are
+ * too generic to allow by name (a site may keep its own session in `sid`), so they pass only in
+ * Seznam's value format, and nothing expires them by name.
+ */
+const SEZNAM_ID_COOKIES = new Map<string, RegExp>([
+	["sid", /^id(=|%3D)\d+/i],
+	["udid", /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i],
+]);
+
+function isForwarded(pair: string): boolean {
+	const separator = pair.indexOf("=");
+	const name = separator === -1 ? pair : pair.slice(0, separator);
+	if (COOKIE_ALLOW.test(name)) return true;
+	const format = SEZNAM_ID_COOKIES.get(name);
+	return format !== undefined && separator !== -1 && format.test(pair.slice(separator + 1));
+}
 
 /** Never forwarded: credentials of the site and the hop-by-hop address chain we rebuild. */
 const DROPPED = new Set(["authorization", "proxy-authorization", "cookie", "x-forwarded-for"]);
@@ -78,7 +96,7 @@ export function filterCookies(header: string | null): string {
 	return header
 		.split(";")
 		.map((pair) => pair.trim())
-		.filter((pair) => pair !== "" && COOKIE_ALLOW.test(pair.split("=", 1)[0]!))
+		.filter((pair) => pair !== "" && isForwarded(pair))
 		.join("; ");
 }
 
