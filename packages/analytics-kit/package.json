@@ -66,12 +66,12 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@c15t/integrations": "3.1.0",
-		"@effect/vitest": "4.0.5",
-		"astro": "7.4.0",
-		"c15t": "3.1.0",
-		"effect": "4.0.5",
-		"tsdown": "0.23.1",
+		"@c15t/integrations": "3.2.2",
+		"@effect/vitest": "4.1.1",
+		"astro": "7.4.4",
+		"c15t": "3.2.2",
+		"effect": "4.1.1",
+		"tsdown": "0.23.4",
 		"typescript": "6.0.3",
 		"vitest": "5.0.5"
 	},
