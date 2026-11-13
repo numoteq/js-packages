@@ -11,7 +11,7 @@ Built on [Effect](https://effect.website) v4. The core is configured at runtime,
 
 ```sh
 pnpm add @numoteq/analytics-kit effect
-# Astro sites also: astro (6 or 7) and @astrojs/cloudflare (13 or 14)
+# Astro sites also: astro (7.4.7 or later) and @astrojs/cloudflare (13 or 14)
 # c15t sites also: c15t @c15t/integrations
 ```
 
