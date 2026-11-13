@@ -68,7 +68,7 @@
 	"devDependencies": {
 		"@c15t/integrations": "3.2.2",
 		"@effect/vitest": "4.1.1",
-		"astro": "7.4.4",
+		"astro": "7.4.7",
 		"c15t": "3.2.2",
 		"effect": "4.1.1",
 		"tsdown": "0.23.4",
@@ -77,7 +77,7 @@
 	},
 	"peerDependencies": {
 		"@c15t/integrations": ">=3",
-		"astro": ">=6",
+		"astro": ">=7.4.7",
 		"c15t": ">=3",
 		"effect": "^4.0.0"
 	},
