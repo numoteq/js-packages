@@ -12,10 +12,11 @@ import {
 
 export type { AnalyticsOptions, UpstreamBinding, UpstreamInput } from "./config.js";
 export {
-	consentFromCookieHeader,
+	consentOfHit,
 	expireUnconsentedCookies,
 	expiredCookieHeaders,
 	registrableDomain,
+	storageOf,
 	type CookieConsent,
 } from "./cookies.js";
 export { loaderPath, SGTM_PREFIX } from "./paths.js";

@@ -58,8 +58,8 @@ describe("@numoteq/analytics-kit/astro", () => {
 		expect(source).toContain("client.send(");
 		expect(source).toContain("context.locals.cfContext?.waitUntil(sent)");
 		expect(source).toContain("context.locals.analytics");
-		expect(source).toContain("import { createAnalytics, expireUnconsentedCookies }");
-		expect(source).toContain("return expireUnconsentedCookies(");
+		expect(source).toContain('import { createAnalytics } from "@numoteq/analytics-kit";');
+		expect(source).toContain("return await next()");
 		expect(source).toContain("context.locals.c15t?.snapshot?.effectivePermissions");
 	});
 

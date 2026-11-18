@@ -4,7 +4,7 @@ First-party analytics plumbing for sites on Cloudflare Workers and Astro. One pa
 
 - **A proxy** to self-hosted server-side Google Tag Manager (sGTM), reachable from the page without ad-blocker-shaped URLs.
 - **Server events** that send from an API route or an action through the Stape Data Client of our sGTM, with the visitor's identifiers, address and consent.
-- **A c15t preset** with our consent categories and the container script that loads through the proxy.
+- **The c15t container script** that loads through the proxy, and the cookies a withdrawn consent deletes in the browser.
 - **Client paths** with no dependencies, for the page.
 
 Built on [Effect](https://effect.website) v4. The core is configured at runtime, so one build serves production, previews and local development.
@@ -190,27 +190,12 @@ An event is sent once. No vendor downstream deduplicates a repeated event, and a
 
 ## c15t
 
-```js
-// astro.config.mjs
-import { c15tPreset } from "@numoteq/analytics-kit/c15t";
-import { c15t } from "c15t/astro";
+The site owns its consent configuration: the policy mode (opt-in or opt-out), the categories, the labels, the theme and the dialog's copy live in the site, next to the banner (`src/components/ui/cookie-consent/` on our sites). This package has no preset and no opinion about them.
 
-export default defineConfig({
-	integrations: [
-		c15t(
-			c15tPreset({
-				// anything a client needs: i18n, legalLinks, presentation, theme, policy rules
-			}),
-		),
-	],
-});
-```
-
-`c15tPreset()` sets our categories (`necessary`, `measurement`, `marketing`), offline mode and c15t's recommended policy pack. Every key you pass wins.
-
-The container script belongs in the client entrypoint (`src/c15t.client.ts`), not in the serialized options, because it carries callbacks:
+What it does provide is the container script and the cookies a withdrawal deletes in the browser:
 
 ```ts
+// src/components/ui/cookie-consent/client.ts
 import { gtmScripts } from "@numoteq/analytics-kit/c15t";
 import type { C15tClientOptionsExtension } from "c15t/astro";
 
@@ -219,43 +204,63 @@ export default {
 } satisfies C15tClientOptionsExtension;
 ```
 
-`gtmScripts()` is `googleTagManager()` from `@c15t/integrations` with the container URL pointed at our loader: gtm.js is served first-party and the shim is installed before it. It defaults to advanced consent mode (`loadMode: "always"`, category `necessary`), where GTM loads before the visitor chooses and sends cookieless pings to our sGTM. Pass `loadMode: "after-consent"` for basic mode. The container id never reaches the page; the Worker adds the real one from `GTM_ID`.
+`gtmScripts()` is `googleTagManager()` from `@c15t/integrations` with the container URL pointed at our loader: gtm.js is served first-party and the shim is installed before it. It defaults to advanced consent mode (`loadMode: "always"`, category `necessary`), where GTM loads before the visitor chooses and sends cookieless hits to our sGTM.
 
-The client entrypoint must stay exactly this and nothing else: no per-site cookie deletion, no custom revocation code.
+**`gtm.js` must load on every page, consent or not.** That is the default for a reason: those hits are how the server learns the visitor's consent (see [Cookie cleanup](#cookie-cleanup)). A site that switched to `loadMode: "after-consent"` would stop sending hits before a choice, and the server would have nothing to clean up with.
+
+The client entrypoint stays this and nothing else: no per-site cookie deletion, no custom revocation code.
+
+The browser deletions come from the same lists the server expires:
 
 ```ts
-export default { scripts: gtmScripts() };
+import { marketingCookies, measurementCookies } from "@numoteq/analytics-kit/c15t";
+
+clearOnRevocation: {
+	measurement: { cookies: [...measurementCookies] },
+	marketing: { cookies: [...marketingCookies] },
+},
 ```
 
-`c15tPreset()` sets `clearOnRevocation` for the browser: withdrawing `measurement` deletes `_ga`, `_ga_*` and `_gid`, withdrawing `marketing` deletes `_gcl_*`, `_fbp`, `_fbc` and `_gtmeec`, immediately and without a reload. That only reaches cookies JavaScript can see; see [Cookie cleanup](#cookie-cleanup) for the `HttpOnly` ones and for visitors who never come back to the banner.
+Withdrawing `measurement` deletes `_ga`, `_ga_*` and `_gid`, withdrawing `marketing` deletes `_gcl_*`, `_fbp`, `_fbc` and `_gtmeec`, immediately and without a reload. That only reaches cookies JavaScript can see.
+
+## Consent travels on the hit
+
+There is one source of truth for consent, and it is the hit:
+
+```text
+c15t → GTM Consent Mode → gcs on every GA4 hit → our proxy and sGTM read the same value
+```
+
+- **`gcs` is Google's**, `G1` then `ad_storage` then `analytics_storage`: `1` granted, `0` denied, `-` unset. `ad_storage` is our `marketing`, `analytics_storage` our `measurement`.
+- **The proxy is transport only.** It forwards the hit to sGTM unchanged, headers and cookies included, and sGTM decides what leaves it. Nothing here re-reads or re-decides consent.
+- **Opt-in and opt-out are the site's choice**, made once where c15t is configured. They change what c15t puts in `gcs`; neither the proxy nor sGTM has a setting for them.
+- **A site needs `measurement` and `marketing`** in its categories: they are the two storages whose cookies are forwarded and expired. Further categories stay in the browser and never reach sGTM.
 
 ## Cookie cleanup
 
-Consent that is not granted leaves the analytics and marketing cookies behind: GTM's GA4 client sets `FPID` and `FPLC` `HttpOnly`, so JavaScript can neither read nor delete them, and GA sets `_ga` on the registrable domain. The package expires these cookies **on the server**, on every response it touches: page responses through the Astro middleware, and the proxy's loader and hit responses.
+Consent that is not granted leaves the analytics and marketing cookies behind: GTM's GA4 client sets `FPID` and `FPLC` `HttpOnly`, so JavaScript can neither read nor delete them, and GA sets `_ga` on the registrable domain. The package expires these cookies **on the server**, on the answer to the hit that carries the denial.
 
 - **Measurement:** `_ga`, `_ga_*`, `_gid`, `FPID`, `FPLC`, `FPGSID`.
 - **Marketing:** `_gcl_*`, `_fbp`, `_fbc`, and the rest of the forwarded ads allowlist (`FPAU`, `FPGCL*`, `_gtmeec`, `sznaiid`, `_dm_session_attributes`). Seznam's `sid` and `udid` are forwarded but never expired: their names are too generic to delete a cookie by name.
 
-A cookie is expired when its storage is not granted. Each expiry is appended twice, so the parent-domain cookie dies too: once without `Domain` (the host-only cookie) and once with `Domain=<eTLD+1>` of the request host (`www.example.com` → `example.com`). Existing `Set-Cookie` headers are kept, the body is not touched, and nothing outside the lists is expired, `c15t*` cookies least of all.
+The consent comes from the hit itself: the `gcs` query parameter, or the body of a POST hit. Only an explicit `0` expires anything. A hit with no `gcs`, with `-`, or with a value we cannot read deletes nothing: the visitor's next hit does the work, and a page response (which carries no hit) expires nothing.
 
-Consent comes from c15t: in Astro from `locals.c15t.snapshot.effectivePermissions` after c15t's middleware ran; on a proxy response, where no middleware runs, from c15t's consent cookie (`c15t`, or the legacy `privacy-consent-storage`) parsed the way c15t stores it. A missing, unreadable or malformed record counts as denied.
+Each expiry is appended twice, so the parent-domain cookie dies too: once without `Domain` (the host-only cookie) and once with `Domain=<eTLD+1>` of the request host (`www.example.com` → `example.com`). Existing `Set-Cookie` headers are kept, the body is not touched, and nothing outside the lists is expired, `c15t*` cookies least of all.
 
-Sites must **not** implement their own cookie deletion, in JavaScript or in another middleware. This is the one shared mechanism; per-site deletions drift, cannot reach `HttpOnly` cookies, and leave the domain-scoped copies alive. Remove them and let the package clean up. `c15tPreset()` already adds c15t's `clearOnRevocation` for the browser-readable cookies, so `src/c15t.client.ts` stays `export default { scripts: gtmScripts() }` with nothing else, and no page or middleware deletes cookies of its own.
+Sites must **not** implement their own cookie deletion, in JavaScript or in another middleware. This is the one shared mechanism; per-site deletions drift and cannot reach `HttpOnly` cookies. The browser half is `clearOnRevocation` built from the same lists, so imports `@numoteq/analytics-kit/c15t` and nothing else.
 
 Other frameworks get the pure helper and append the values to their own response:
 
 ```ts
-import { expiredCookieHeaders } from "@numoteq/analytics-kit";
+import { expiredCookieHeaders, consentOfHit } from "@numoteq/analytics-kit";
 
-const headers = expiredCookieHeaders(
-	request.headers.get("cookie"),
-	consent,
-	new URL(request.url).host,
-);
-for (const header of headers) response.headers.append("set-cookie", header);
+const consent = consentOfHit(target, body);
+for (const header of expiredCookieHeaders(request.headers.get("cookie"), consent, host)) {
+	response.headers.append("set-cookie", header);
+}
 ```
 
-`expiredCookieHeaders(cookieHeader, consent, host)` takes `{ measurement, marketing }` booleans, exactly the c15t categories, and returns the `Set-Cookie` values (empty when there is nothing to expire). `expireUnconsentedCookies(response, request, consent?)` does the same on a `Response`; without `consent` it reads c15t's cookie.
+`expiredCookieHeaders(cookieHeader, consent, host)` takes `{ measurement, marketing }` booleans, exactly the c15t categories, and returns the `Set-Cookie` values (empty when there is nothing to expire). `consentOfHit(target, body?)` turns a hit into those booleans. `expireUnconsentedCookies(response, request, consent)` does both on a `Response`.
 
 The domain is a small heuristic, not the Public Suffix List: it handles `www.` and the usual two-label suffixes such as `co.uk` or `com.au`, so country domains like `example.cz` are right. Rare multi-label public suffixes, and a host that is itself a public suffix, are not detected; `localhost` and IP literals get only the host-only expiry.
 
@@ -264,7 +269,7 @@ The domain is a small heuristic, not the Public Suffix List: it handles `www.` a
 - Requests the browser sends straight to Google or Meta domains (Ads conversion pings, `google.com/ccm`, the Meta pixel) are not proxied. Move those tags into the server container.
 - The shim hooks `fetch` with a string or `URL`, `sendBeacon` and the `src` of script and image elements. It does not hook `XMLHttpRequest`, `setAttribute("src")` or `fetch(new Request(…))`. A script you add to the page must send through the hooked channels to be proxied.
 - The token is obfuscation, not encryption: the shim carries everything needed to decode it. It defeats static URL patterns and authenticates nothing.
-- The proxy is transport only. It does not set or bypass consent; it reads the visitor's stored decision solely to expire the cookies they did not allow. Keep consent mode and your CMP as they are.
+- The proxy is transport only. It forwards every hit, with its cookies, and reads the consent the hit carries (`gcs`) solely to expire the cookies the visitor did not allow. Keep consent mode and your CMP as they are.
 
 ## Development
 

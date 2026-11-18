@@ -1,8 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import type { C15tAstroOptions, Script } from "c15t/astro";
+import type { Script } from "c15t/astro";
 
-import { c15tPreset, gtmScript, gtmScripts, type GtmScriptOptions } from "../src/c15t.js";
+import {
+	gtmScript,
+	gtmScripts,
+	marketingCookies,
+	measurementCookies,
+	type GtmScriptOptions,
+} from "../src/c15t.js";
 import { loaderPath } from "../src/paths.js";
 
 function script(options: GtmScriptOptions): Script {
@@ -11,44 +17,10 @@ function script(options: GtmScriptOptions): Script {
 	return result;
 }
 
-describe("c15tPreset", () => {
-	it("offers our categories in offline mode", () => {
-		const preset = c15tPreset() satisfies C15tAstroOptions;
-
-		expect(preset.consentCategories).toEqual(["necessary", "measurement", "marketing"]);
-		expect(preset.mode).toBeDefined();
-		expect(preset.mode).toMatchObject({ type: "offline" });
-	});
-
-	it("stays plain JSON data", () => {
-		const preset = c15tPreset();
-		const parsed = JSON.parse(JSON.stringify(preset)) as {
-			consentCategories?: string[];
-			mode?: { type?: string };
-		};
-
-		expect(parsed.consentCategories).toEqual(["necessary", "measurement", "marketing"]);
-		expect(parsed.mode?.type).toBe("offline");
-	});
-
-	it("lets a site override categories and keeps the mode", () => {
-		const preset = c15tPreset({ consentCategories: ["necessary"] });
-
-		expect(preset.consentCategories).toEqual(["necessary"]);
-		expect(preset.mode).toMatchObject({ type: "offline" });
-	});
-
-	it("clears the browser-readable cookies of a withdrawn category", () => {
-		expect(c15tPreset().clearOnRevocation).toEqual({
-			measurement: { cookies: ["_ga", "_ga_*", "_gid"] },
-			marketing: { cookies: ["_gcl_*", "_fbp", "_fbc", "_gtmeec"] },
-		});
-	});
-
-	it("lets a site override the revocation targets", () => {
-		const preset = c15tPreset({ clearOnRevocation: { marketing: { cookies: ["_custom"] } } });
-
-		expect(preset.clearOnRevocation).toEqual({ marketing: { cookies: ["_custom"] } });
+describe("revocation targets", () => {
+	it("lists the browser-readable cookies of each storage", () => {
+		expect(measurementCookies).toEqual(["_ga", "_ga_*", "_gid"]);
+		expect(marketingCookies).toEqual(["_gcl_*", "_fbp", "_fbc", "_gtmeec"]);
 	});
 });
 

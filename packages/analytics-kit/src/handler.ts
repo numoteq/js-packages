@@ -2,7 +2,7 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 
 import { decodeToken } from "./codec.js";
 import { ProxyConfig } from "./config.js";
-import { expireUnconsentedCookies } from "./cookies.js";
+import { consentOfHit, expireUnconsentedCookies } from "./cookies.js";
 import { encodedPrefix, loaderPath, SGTM_PREFIX, sgtmPathOf } from "./paths.js";
 import {
 	concatBytes,
@@ -208,19 +208,26 @@ const forwardEncoded = Effect.fn("analytics.forward")(function* (
 	if (upstream === undefined) return empty(404);
 
 	const hasBody = request.method !== "GET" && request.method !== "HEAD";
+	const body = hasBody
+		? yield* Effect.tryPromise({
+				try: () => request.arrayBuffer().then((buffer) => new Uint8Array(buffer)),
+				catch: (cause) => new UpstreamUnavailable({ reason: "body read failed", cause }),
+			})
+		: undefined;
+	// The hit carries the visitor's consent in `gcs`, the same value sGTM reads.
+	const consent = consentOfHit(target, body);
+
 	return yield* Effect.gen(function* () {
 		const answer = yield* upstream.fetch(path, {
 			method: request.method,
 			headers: upstreamHeaders(request, clientIp),
-			body: hasBody ? request.body : null,
+			body: body ?? null,
 			redirect: "manual",
-			...(hasBody ? { duplex: "half" } : {}),
 		});
 		// Scripts the container loads itself, such as gtag.js, need their hosts rewritten too.
-		if (answer.ok && isJavaScript(answer)) {
-			return yield* rewriteScript(request, answer);
-		}
-		return answer;
+		const response =
+			answer.ok && isJavaScript(answer) ? yield* rewriteScript(request, answer) : answer;
+		return expireUnconsentedCookies(response, request, consent);
 	}).pipe(timeout(REQUEST_TIMEOUT));
 });
 
@@ -256,9 +263,7 @@ export const handle = (request: Request) => {
 					Effect.as(empty(502)),
 				),
 		}),
-		// Every proxy answer carries the expiry of the cookies the visitor did not consent to; the
-		// loader cache holds the answer without them, so appending here keeps the cache reusable.
-		Effect.map((response) => Option.some(expireUnconsentedCookies(response, request))),
+		Effect.map(Option.some),
 		Effect.withSpan("analytics.request", { attributes: { "analytics.route": route } }),
 	);
 };

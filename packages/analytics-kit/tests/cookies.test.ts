@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
-	consentFromCookieHeader,
+	consentOfHit,
 	expireUnconsentedCookies,
 	expiredCookieHeaders,
 	registrableDomain,
@@ -11,20 +11,9 @@ import { MARKETING_COOKIE_PATTERNS, MEASUREMENT_COOKIE_PATTERNS } from "../src/r
 
 const HOST = "www.example.com";
 const EXPIRES = "Thu, 01 Jan 1970 00:00:00 GMT";
-const AT = 1_700_000_000_000;
 
 const expiry = (name: string, domain?: string) =>
 	`${name}=; Path=/; Max-Age=0; Expires=${EXPIRES}${domain === undefined ? "" : `; Domain=${domain}`}`;
-
-/** A c15t v3 record with the given category decisions. */
-const v3 = (decisions: Record<string, boolean>) => {
-	const codes = { functionality: "fn", experience: "ex", measurement: "me", marketing: "mk" };
-	const fields = Object.entries(decisions).map(
-		([category, granted]) => `${codes[category as keyof typeof codes]}=${granted ? 1 : 0}.${AT}.0`,
-	);
-	// The order c15t's encoder writes: version, subject, epoch, bases, then the decisions.
-	return ["v=3", "sid=subject", `b=c${"a".repeat(8)}`, ...fields].join("&");
-};
 
 /** A concrete cookie name for an allowlist pattern. */
 const sample = (pattern: string) => pattern.replace(/\*$/u, "TEST");
@@ -119,64 +108,31 @@ describe("expiredCookieHeaders", () => {
 	});
 });
 
-describe("consentFromCookieHeader", () => {
-	it("reads a v3 compact record", () => {
-		const consent = consentFromCookieHeader(
-			`session=abc; c15t=${v3({ measurement: true, marketing: false })}`,
-		);
+describe("consentOfHit", () => {
+	const granted = { measurement: true, marketing: true };
 
-		expect(consent).toEqual({ measurement: true, marketing: false });
-	});
-
-	it("reads a v3 JSON record", () => {
-		const value = JSON.stringify({
-			version: 3,
-			categories: {
-				measurement: {
-					value: true,
-					confirmedAt: AT,
-					basis: { kind: "choice-v1", fingerprint: "f" },
-				},
-			},
+	it("reads gcs from the hit's query", () => {
+		expect(consentOfHit("/g/collect?id=G-1&gcs=G100")).toEqual({
+			measurement: false,
+			marketing: false,
 		});
-
-		expect(consentFromCookieHeader(`c15t=${encodeURIComponent(value)}`)).toEqual({
+		expect(consentOfHit("/g/collect?gcs=G111")).toEqual(granted);
+		expect(consentOfHit("/g/collect?gcs=G101")).toEqual({
 			measurement: true,
 			marketing: false,
 		});
 	});
 
-	it("reads the legacy compact and JSON records", () => {
-		expect(consentFromCookieHeader(`c15t=c.measurement:1,c.marketing:0,i.t:${AT}`)).toEqual({
-			measurement: true,
-			marketing: false,
-		});
-		expect(
-			consentFromCookieHeader(
-				`c15t=${encodeURIComponent(JSON.stringify({ consentInfo: { time: AT }, consents: { marketing: true } }))}`,
-			),
-		).toEqual({ measurement: false, marketing: true });
+	it("reads gcs from a POST body", () => {
+		const body = new TextEncoder().encode("v=2&gcs=G110&sid=1");
+
+		expect(consentOfHit("/g/collect", body)).toEqual({ measurement: false, marketing: true });
 	});
 
-	it("reads the legacy cookie name too", () => {
-		expect(consentFromCookieHeader(`privacy-consent-storage=${v3({ measurement: true })}`)).toEqual(
-			{
-				measurement: true,
-				marketing: false,
-			},
-		);
-	});
-
-	it("grants nothing for a missing, unknown or malformed cookie", () => {
-		const denied = { measurement: false, marketing: false };
-		expect(consentFromCookieHeader(undefined)).toEqual(denied);
-		expect(consentFromCookieHeader("session=abc")).toEqual(denied);
-		expect(consentFromCookieHeader("c15t=garbage")).toEqual(denied);
-		expect(consentFromCookieHeader("c15t=v=4&me=1.1700000000000.0")).toEqual(denied);
-		expect(consentFromCookieHeader(`c15t=v=3&mk=maybe`)).toEqual(denied);
-		expect(consentFromCookieHeader("c15t=v=3&me=1.1700000000000.0&unknown=1")).toEqual(denied);
-		// c15t rejects a decision that has no basis list, so it grants nothing either.
-		expect(consentFromCookieHeader(`c15t=v=3&sid=abc&me=1.${AT}.0`)).toEqual(denied);
+	it("grants both when the hit carries no gcs it can read", () => {
+		expect(consentOfHit("/g/collect")).toEqual(granted);
+		expect(consentOfHit("/g/collect?gcs=G1--")).toEqual(granted);
+		expect(consentOfHit("/g/collect?gcs=nonsense")).toEqual(granted);
 	});
 });
 
@@ -204,11 +160,11 @@ describe("expireUnconsentedCookies", () => {
 		expect(response.headers.getSetCookie()).toHaveLength(3);
 	});
 
-	it("uses the c15t cookie when no consent is given", () => {
-		const response = expireUnconsentedCookies(
-			new Response("page"),
-			request(`c15t=${v3({ measurement: true, marketing: true })}; _ga=1; _fbp=2`),
-		);
+	it("keeps the cookies the visitor allowed", () => {
+		const response = expireUnconsentedCookies(new Response("page"), request("_ga=1; _fbp=2"), {
+			measurement: true,
+			marketing: true,
+		});
 
 		expect(response.headers.getSetCookie()).toEqual([]);
 	});

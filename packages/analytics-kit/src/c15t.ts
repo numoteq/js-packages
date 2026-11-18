@@ -1,40 +1,30 @@
 /**
- * c15t integration: a preset for the Astro integration and the Google Tag Manager container as a
- * script. Kept free of runtime-only dependencies, because `astro.config.mjs` imports it too.
+ * c15t integration: the Google Tag Manager container as a script, and the cookies a withdrawal
+ * has to delete in the browser. Kept free of runtime-only dependencies, because
+ * `astro.config.mjs` imports it too.
+ *
+ * The consent configuration itself — policy mode, categories, labels, theme — belongs to the site
+ * (`src/components/ui/cookie-consent/config.ts`), not here.
  */
 
 import {
 	googleTagManager,
 	type GoogleTagManagerOptions,
 } from "@c15t/integrations/google-tag-manager";
-import { offline, type C15tAstroOptions, type Script } from "c15t/astro";
+import type { Script } from "c15t/astro";
 
 import { loaderPath } from "./paths.js";
 import { MARKETING_COOKIE_PATTERNS, MEASUREMENT_COOKIE_PATTERNS } from "./rewrite.js";
 
-export type C15tPreset = C15tAstroOptions;
-
 /**
- * Options for `c15t()` in `astro.config.mjs`: our categories, offline mode and c15t's recommended
- * policy pack. Anything a client passes wins, so texts, legal links, theme and policy rules stay
- * per site.
+ * The cookies a withdrawal of `measurement` deletes in the browser, in c15t's `clearOnRevocation`
+ * shape. The server expires the same cookies under `gcs` from the hit, plus the `HttpOnly` ones
+ * JavaScript cannot reach, so both halves stay in step.
  */
-export function c15tPreset(overrides: C15tAstroOptions = {}): C15tPreset {
-	return {
-		mode: offline(),
-		consentCategories: ["necessary", "measurement", "marketing"],
-		/**
-		 * The browser deletes what JavaScript can see the moment a category is withdrawn, without
-		 * a reload. `HttpOnly` cookies never reach it; the Worker expires those, and the ones left
-		 * after a withdrawal, on the next response.
-		 */
-		clearOnRevocation: {
-			measurement: { cookies: MEASUREMENT_COOKIE_PATTERNS },
-			marketing: { cookies: MARKETING_COOKIE_PATTERNS },
-		},
-		...overrides,
-	};
-}
+export const measurementCookies: readonly string[] = MEASUREMENT_COOKIE_PATTERNS;
+
+/** The cookies a withdrawal of `marketing` deletes in the browser. */
+export const marketingCookies: readonly string[] = MARKETING_COOKIE_PATTERNS;
 
 /**
  * No `dataLayer`: c15t would queue consent into the renamed layer, while our loader serves gtm.js
@@ -50,7 +40,8 @@ export interface GtmScriptOptions extends Omit<GoogleTagManagerOptions, "id" | "
 /**
  * The web container as a c15t script: `googleTagManager()` with the container URL pointed at our
  * loader, so gtm.js is first-party and our shim is installed before it. Put it in
- * `C15tClientOptionsExtension.scripts` (e.g. `src/c15t.client.ts`), not in the serialized options.
+ * `C15tClientOptionsExtension.scripts` (e.g. `src/components/ui/cookie-consent/client.ts`), not in
+ * the serialized options.
  *
  * Returns `undefined` when no host is known, which is the server and build time; the caller then
  * exports `scripts: []`.

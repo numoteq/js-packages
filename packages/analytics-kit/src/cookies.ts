@@ -2,6 +2,10 @@
  * Cookie cleanup: server-side expiry of analytics and marketing cookies the visitor has not
  * consented to. It is the only way to remove `HttpOnly` cookies such as `FPID` and `FPLC`, which
  * the sGTM GA4 client sets and JavaScript never sees.
+ *
+ * The consent comes from the hit itself, the `gcs` parameter Google Consent Mode puts on every
+ * hit: the same value sGTM reads. A request that carries none deletes nothing, and the visitor's
+ * next hit does the work.
  */
 
 import { ANALYTICS_COOKIE, COOKIE_ALLOW } from "./rewrite.js";
@@ -11,48 +15,12 @@ import type { Consent } from "./server/context.js";
 export type CookieConsent = Pick<Consent, "measurement" | "marketing">;
 
 type Storage = "measurement" | "marketing";
-type OptionalCategory = "functionality" | "experience" | "measurement" | "marketing";
-type Decisions = Partial<Record<OptionalCategory, boolean>>;
 
 /** The expired cookie is written without `Secure` and `SameSite`: browsers match on name, domain and path. */
 const EXPIRES = "Thu, 01 Jan 1970 00:00:00 GMT";
 
-/** c15t's consent record cookie, current and legacy names. Its other `c15t-*` records never match. */
-const CONSENT_COOKIES = ["c15t", "privacy-consent-storage"];
-
-const CATEGORY_CODES: Readonly<Record<string, OptionalCategory>> = {
-	fn: "functionality",
-	ex: "experience",
-	mk: "marketing",
-	me: "measurement",
-};
-
-/** c15t's shortened legacy keys, the reverse of its `COOKIE_KEY_MAP`. */
-const LEGACY_KEYS: Readonly<Record<string, string>> = {
-	i: "consentInfo",
-	c: "consents",
-	id: "id",
-	eid: "externalId",
-	idp: "identityProvider",
-	sid: "subjectId",
-	t: "time",
-	ts: "timestamp",
-	y: "type",
-	mpf: "materialPolicyFingerprint",
-	icv: "iabCustomVendorConsents",
-	icvli: "iabCustomVendorLegitimateInterests",
-};
-
-const OPTIONAL_CATEGORIES = new Set<string>([
-	"functionality",
-	"experience",
-	"measurement",
-	"marketing",
-]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/** `gcs` is `G1`, then `ad_storage`, then `analytics_storage`: `1` granted, `0` denied, `-` unset. */
+const GCS = /^G1([01-])([01-])$/u;
 
 /** Which storage a forwarded cookie belongs to, or `undefined` for a cookie we leave alone. */
 export function storageOf(name: string): Storage | undefined {
@@ -73,140 +41,27 @@ function cookieValues(header: string | null | undefined): Map<string, string> {
 }
 
 /**
- * `v=3&b=…&me=1.1700000000.0` as c15t writes it. Any field c15t would reject makes the whole
- * record invalid, and an invalid record is a denial.
+ * The consent a hit carries, from the `gcs` query parameter or, on a POST hit, from its form body.
+ * Only an explicit `0` counts as denied; a missing, `-` or unreadable value grants the category,
+ * so a hit we cannot read deletes nothing.
  */
-function parseCompact(text: string): Decisions | undefined {
-	const parts = text.split("&");
-	if (parts[0] !== "v=3") return undefined;
-	const fields = new Map<string, string>();
-	for (const part of parts.slice(1)) {
-		const separator = part.indexOf("=");
-		if (separator <= 0) return undefined;
-		const key = part.slice(0, separator);
-		if (fields.has(key)) return undefined;
-		fields.set(key, part.slice(separator + 1));
-	}
-	const bases = fields.get("b");
-	const basisCount = bases === undefined ? 0 : bases === "" ? undefined : bases.split("|").length;
-	if (basisCount === undefined) return undefined;
-	const now = Date.now();
-	const decisions: Decisions = {};
-	for (const [key, value] of fields) {
-		if (key === "b" || key === "e" || key === "sid" || key === "eid" || key === "idp") continue;
-		if (key === "icv" || key === "icvli") continue;
-		const category = CATEGORY_CODES[key];
-		if (category === undefined) return undefined;
-		const [flag, time, index] = value.split(".");
-		const confirmedAt = time === undefined ? Number.NaN : Number(time);
-		if (
-			(flag !== "0" && flag !== "1") ||
-			!Number.isSafeInteger(confirmedAt) ||
-			confirmedAt < 0 ||
-			confirmedAt > now ||
-			index === undefined ||
-			!/^\d+$/u.test(index) ||
-			Number(index) >= basisCount
-		) {
-			return undefined;
-		}
-		decisions[category] = flag === "1";
-	}
-	return decisions;
-}
+export function consentOfHit(target: string, body?: Uint8Array): CookieConsent {
+	const granted: CookieConsent = { measurement: true, marketing: true };
+	const url = new URL(target, "https://sgtm.invalid");
+	const fromQuery = url.searchParams.get("gcs");
+	const fromBody =
+		fromQuery === null && body !== undefined
+			? new URLSearchParams(new TextDecoder().decode(body)).get("gcs")
+			: null;
+	const gcs = fromQuery ?? fromBody;
+	if (gcs === null) return granted;
 
-function parseJson(text: string): Decisions | undefined {
-	let value: unknown;
-	try {
-		value = JSON.parse(text);
-	} catch {
-		return undefined;
-	}
-	if (!isRecord(value)) return undefined;
-	const categories = value.categories;
-	if (value.version === 3) {
-		if (!isRecord(categories)) return undefined;
-		const decisions: Decisions = {};
-		for (const [category, decision] of Object.entries(categories)) {
-			if (!OPTIONAL_CATEGORIES.has(category)) return undefined;
-			if (!isRecord(decision) || typeof decision.value !== "boolean") return undefined;
-			if (typeof decision.confirmedAt !== "number" || !isRecord(decision.basis)) return undefined;
-			decisions[category as OptionalCategory] = decision.value;
-		}
-		return decisions;
-	}
-	const consents = value.consents;
-	if (!isRecord(consents)) return undefined;
-	const decisions: Decisions = {};
-	for (const [category, granted] of Object.entries(consents)) {
-		if (category === "necessary") continue;
-		if (!OPTIONAL_CATEGORIES.has(category)) continue;
-		if (typeof granted !== "boolean") return undefined;
-		decisions[category as OptionalCategory] = granted;
-	}
-	return decisions;
-}
-
-/** The pre-v3 `c.measurement:1,i.t:1700000000` form. */
-function parseLegacyCompact(text: string): Decisions | undefined {
-	const decisions: Decisions = {};
-	for (const pair of text.split(",")) {
-		const separator = pair.indexOf(":");
-		if (separator <= 0) return undefined;
-		const path = pair
-			.slice(0, separator)
-			.split(".")
-			.map((segment) => LEGACY_KEYS[segment] ?? segment);
-		const value = pair.slice(separator + 1);
-		if (path.length !== 2 || path[0] !== "consents") continue;
-		const category = path[1]!;
-		if (category === "necessary" || !OPTIONAL_CATEGORIES.has(category)) continue;
-		if (value !== "1" && value !== "0") return undefined;
-		decisions[category as OptionalCategory] = value === "1";
-	}
-	return decisions;
-}
-
-/** One stored record in any form c15t has written, or `undefined` when it is none of them. */
-function parseForm(candidate: string): Decisions | undefined {
-	if (candidate === "v=3" || candidate.startsWith("v=3&")) return parseCompact(candidate);
-	if (candidate.startsWith("{")) return parseJson(candidate);
-	if (candidate.includes(":")) return parseLegacyCompact(candidate);
-	return undefined;
-}
-
-function parseDecisions(text: string): Decisions {
-	const trimmed = text.trim();
-	if (trimmed === "") return {};
-	const direct = parseForm(trimmed);
-	if (direct !== undefined) return direct;
-	if (trimmed.includes("%")) {
-		try {
-			const decoded = parseForm(decodeURIComponent(trimmed).trim());
-			if (decoded !== undefined) return decoded;
-		} catch {
-			// A broken escape is as invalid as a broken record.
-		}
-	}
-	return {};
-}
-
-/**
- * Consent as c15t wrote it in its cookie. A missing, unreadable or malformed cookie grants
- * nothing, so the cleanup errs towards deleting.
- */
-export function consentFromCookieHeader(header: string | null | undefined): CookieConsent {
-	const jar = cookieValues(header);
-	for (const name of CONSENT_COOKIES) {
-		const value = jar.get(name);
-		if (value === undefined) continue;
-		const decisions = parseDecisions(value);
-		return {
-			measurement: decisions.measurement === true,
-			marketing: decisions.marketing === true,
-		};
-	}
-	return { measurement: false, marketing: false };
+	const match = GCS.exec(gcs);
+	if (match === null) return granted;
+	return {
+		marketing: match[1] !== "0",
+		measurement: match[2] !== "0",
+	};
 }
 
 /** Second-level labels that host public suffixes, so `co.uk` needs three labels. */
@@ -292,19 +147,16 @@ export function expiredCookieHeaders(
 
 /**
  * The response with the expired cookies appended, every existing `Set-Cookie` kept. The body is
- * left alone, and a response with nothing to expire is returned as it is. Without `consent` the
- * visitor's c15t cookie decides, which is what a proxy response can rely on: no middleware ran
- * on it, so there are no locals to read.
+ * left alone, and a response with nothing to expire is returned as it is.
  */
 export function expireUnconsentedCookies(
 	response: Response,
 	request: Request,
-	consent?: CookieConsent,
+	consent: CookieConsent,
 ): Response {
-	const cookieHeader = request.headers.get("cookie");
 	const expired = expiredCookieHeaders(
-		cookieHeader,
-		consent ?? consentFromCookieHeader(cookieHeader),
+		request.headers.get("cookie"),
+		consent,
 		new URL(request.url).host,
 	);
 	if (expired.length === 0) return response;
