@@ -232,7 +232,7 @@ c15t → GTM Consent Mode → gcs on every GA4 hit → our proxy and sGTM read t
 ```
 
 - **`gcs` is Google's**, `G1` then `ad_storage` then `analytics_storage`: `1` granted, `0` denied, `-` unset. `ad_storage` is our `marketing`, `analytics_storage` our `measurement`.
-- **The proxy is transport only.** It forwards the hit to sGTM unchanged, headers and cookies included, and sGTM decides what leaves it. Nothing here re-reads or re-decides consent.
+- **The proxy is transport only.** It forwards the hit to sGTM unchanged, headers and cookies included, and sGTM decides what leaves it. Nothing here re-decides consent.
 - **Opt-in and opt-out are the site's choice**, made once where c15t is configured. They change what c15t puts in `gcs`; neither the proxy nor sGTM has a setting for them.
 - **A site needs `measurement` and `marketing`** in its categories: they are the two storages whose cookies are forwarded and expired. Further categories stay in the browser and never reach sGTM.
 

@@ -2,7 +2,7 @@
 
 import { filterCookies } from "../rewrite.js";
 
-/** Consent categories, the same names the c15t preset offers. */
+/** Consent categories, the names our sites configure in c15t. */
 export type ConsentCategory =
 	| "necessary"
 	| "functionality"
