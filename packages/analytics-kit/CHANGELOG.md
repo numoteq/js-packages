@@ -1,5 +1,11 @@
 # @numoteq/analytics-kit
 
+## 2.1.0
+
+### Minor Changes
+
+- 84e5e34: Cookie cleanup reads consent from the hit (`gcs`) instead of parsing c15t's cookie, the preset is gone and the consent configuration belongs to the site, and the browser deletion lists are exported.
+
 ## 2.0.0
 
 ### Major Changes
