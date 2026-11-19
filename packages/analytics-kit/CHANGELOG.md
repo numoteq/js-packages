@@ -1,5 +1,11 @@
 # @numoteq/analytics-kit
 
+## 2.1.1
+
+### Patch Changes
+
+- dc71436: Docs only, no code change: the consent categories are described as the ones our sites configure in c15t, now that the package ships no preset, and the proxy section no longer claims it never re-reads consent (`consentOfHit` reads `gcs` from the hit to expire the cookies the visitor did not allow).
+
 ## 2.1.0
 
 ### Minor Changes
