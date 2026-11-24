@@ -61,11 +61,11 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@ahasend/sdk": "0.5.0"
+		"@ahasend/sdk": "0.8.0"
 	},
 	"devDependencies": {
-		"@emdash-cms/plugin-cli": "0.13.5",
-		"emdash": "1.4.0",
+		"@emdash-cms/plugin-cli": "0.13.6",
+		"emdash": "1.5.0",
 		"tsdown": "0.23.7",
 		"typescript": "6.0.3",
 		"vitest": "5.1.0"
